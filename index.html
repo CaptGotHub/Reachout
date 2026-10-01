@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reachout | Music gigs</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Reachout</h1>
+    <p>Keep up with music inquiries, replies, and gigs.</p>
+  </header>
+  <main>
+    <p id="notice" role="status" aria-live="polite"></p>
+    <section aria-labelledby="inquiry-heading">
+      <h2 id="inquiry-heading">New inquiry</h2>
+      <p>Record a request you receive by phone, email, or in person.</p>
+      <form id="inquiry-form">
+        <label>Name <input name="name" required autocomplete="name"></label>
+        <label>Email <input name="email" type="email" required autocomplete="email"></label>
+        <label>Event / service <input name="event" required placeholder="Live music for a wedding"></label>
+        <label>Details <textarea name="message" rows="3" placeholder="Date, budget, and anything to follow up on"></textarea></label>
+        <button type="submit">Save inquiry</button>
+      </form>
+      <h3>Inquiries</h3>
+      <ul id="inquiries"></ul>
+    </section>
+    <section aria-labelledby="booking-heading">
+      <h2 id="booking-heading">Book a gig</h2>
+      <form id="gig-form">
+        <label>Inquiry <select name="inquiryId" id="inquiry-select" required></select></label>
+        <label>Venue <input name="venue" required></label>
+        <label>Starts <input name="start" type="datetime-local" required></label>
+        <label>Ends <input name="end" type="datetime-local" required></label>
+        <button type="submit">Add to calendar</button>
+      </form>
+    </section>
+    <section aria-labelledby="calendar-heading">
+      <h2 id="calendar-heading">Gig calendar</h2>
+      <div class="calendar-controls">
+        <button type="button" id="previous-month" aria-label="Previous month">←</button>
+        <strong id="month-label" aria-live="polite"></strong>
+        <button type="button" id="next-month" aria-label="Next month">→</button>
+      </div>
+      <div id="calendar" class="calendar" aria-label="Gigs this month"></div>
+      <h3>Scheduled gigs</h3>
+      <ul id="gigs"></ul>
+    </section>
+    <aside>
+      <p>This is a private, single-browser organizer. Data stays in this browser; it is not shared with clients or backed up. Replies open your email app, and calendar downloads can be imported into your calendar. No credit-card details or payments are handled here.</p>
+    </aside>
+  </main>
+</body>
+</html>
