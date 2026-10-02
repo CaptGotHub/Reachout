@@ -11,3 +11,5 @@
 .record-section{padding:14px 0;border-bottom:1px solid var(--line);margin-bottom:14px}.record-summary{display:grid;grid-template-columns:1fr 1fr;gap:7px 18px;margin-bottom:18px}.record-line{display:grid;grid-template-columns:minmax(130px,.8fr) 1.2fr;gap:8px;padding:7px 0;border-bottom:1px solid #282d31}.record-line span{color:#ddd}@media(max-width:700px){.record-summary{grid-template-columns:1fr}}
 
 .detail-statuses{margin-top:18px;padding:16px;border:1px solid var(--line);border-radius:14px;background:#101315}.pro-detail-row{display:grid;grid-template-columns:1fr 150px 1.5fr 34px;gap:8px;margin:8px 0;align-items:center}.remove-detail{border:0;background:#2a1c1a;color:#e1a094;border-radius:8px;height:38px;cursor:pointer}.word-notice{padding:12px;border:1px solid #6b5639;background:#211b14;border-radius:10px;margin-bottom:14px;color:var(--accent)}@media(max-width:760px){.pro-detail-row{grid-template-columns:1fr}.remove-detail{width:42px}}
+
+.lesson-sheet{margin:18px 0;padding:18px;border:1px solid var(--line);border-radius:16px;background:#141719}
