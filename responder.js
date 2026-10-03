@@ -41,9 +41,39 @@ defaultProDetails.forEach(x=>addProDetail(x));document.querySelector('#addCustom
 function proDetails(){return [...document.querySelectorAll('.pro-detail-row')].map(r=>({label:r.querySelector('.detail-label').value||'Detail',status:r.querySelector('.detail-status').value,answer:r.querySelector('.detail-answer').value}))}
 function proDetailsHTML(){return '<h3>DETAILS FOR THE PRO TO COMPLETE</h3><p class="muted">The customer does not need to complete these unless they want to.</p><div class="record-summary">'+proDetails().map(x=>'<div class="record-line"><b>'+esc(x.label)+'</b><span>'+esc(x.status)+(x.answer?' — '+esc(x.answer):'')+'</span></div>').join('')+'</div>'}
 const buildBeforePro=buildDocument;buildDocument=function(mode){buildBeforePro(mode);const box=document.querySelector('#documentPreview');box.innerHTML=box.innerHTML+proDetailsHTML()}
-document.querySelector('#wordProposal').onclick=()=>{buildDocument('both');const box=document.querySelector('#documentPreview');box.insertAdjacentHTML('afterbegin','<div class="word-notice"><b>Word proposal ready for export.</b> The finished customer view below is the content that will become the .docx once the server-side Word generator is connected.</div>');box.scrollIntoView({behavior:'smooth'})}
+
 
 function lessonMode(){const val=String(f.elements.request?.value||'').toLowerCase();return val.includes('lesson')}
 function toggleLeadMode(){const lesson=lessonMode();document.querySelector('#lessonSheet')?.classList.toggle('hidden',!lesson);document.querySelector('#eventSheet')?.classList.toggle('hidden',lesson);document.querySelector('.proposal-choices')?.classList.toggle('hidden',lesson);document.querySelector('.quote-actions')?.classList.toggle('hidden',lesson)}
 f.elements.request?.addEventListener('change',toggleLeadMode);toggleLeadMode();
 document.querySelector('#buildLessonAnswer').onclick=()=>{const d=v(),name=d.name||'there';let s='Hi '+name+' — thanks for reaching out about lessons. I’d be glad to learn a little about what you want to work on and see what kind of lesson setup makes the most sense.';if(d.lessonInstrument)s+=' I saw that you are interested in '+d.lessonInstrument+' lessons.';if(d.lessonFormat&&d.lessonFormat!=='TBD')s+=' '+d.lessonFormat+' can work as the lesson format.';if(d.lessonFrequency&&d.lessonFrequency!=='TBD')s+=' You indicated '+d.lessonFrequency.toLowerCase()+'.';if(d.studentLevel&&d.studentLevel!=='TBD')s+=' Your '+d.studentLevel.toLowerCase()+' level is helpful to know.';if(d.lessonGoals)s+=' I also saw that you would like to work on '+d.lessonGoals+'.';const missing=[];if(!d.lessonTimes||d.lessonTimes==='TBD')missing.push('days/times that work best');if(!d.lessonFormat||d.lessonFormat==='TBD')missing.push('whether you prefer in-person or online');if(missing.length)s+=' To figure out a good first lesson, let me know '+missing.join(' and ')+'.';else s+=' I can use those details to work out a good first lesson time.';s+='\n\nNick Laudani\n617-233-2008';out.value=s;missingBox.innerHTML='<b>Lesson workflow:</b> availability and first-lesson scheduling';out.scrollIntoView({behavior:'smooth'})};
+
+function proposalTextLines(){const d=v(),a=proposalChoice('a'),b=proposalChoice('b');return[
+'Nicholas Laudani — Live Music',
+'Proposal for '+(d.name||'Customer'),
+'',
+'Event: '+(d.request||'TBD'),
+'Date: '+(d.date||'TBD'),
+'Venue: '+(d.location||'TBD'),
+'Load-in: '+(d.loadIn||'TBD'),
+'Start: '+(d.start||'TBD'),
+'Finish: '+(d.end||'TBD'),
+'',
+'OPTION A',
+a.musicians+' musician(s) · '+a.hours+' hour(s)',
+'Fee: '+dollars(a.fee),
+'',
+'OPTION B',
+b.musicians+' musician(s) · '+b.hours+' hour(s)',
+'Fee: '+dollars(b.fee),
+'',
+'Event Details',
+...proDetails().map(x=>x.label+': '+x.status+(x.answer?' — '+x.answer:'')),
+'',
+'Nick Laudani',
+'617-233-2008',
+'studio@spinstream.xyz'
+]}
+async function downloadDocx(){buildDocument('both');if(!window.docx){alert('Word generator did not load. Refresh the page and try again.');return}const {Document,Packer,Paragraph,HeadingLevel}=window.docx;const lines=proposalTextLines();const children=lines.map((line,i)=>new Paragraph({text:line,heading:i===0?HeadingLevel.TITLE:(line==='OPTION A'||line==='OPTION B'||line==='Event Details')?HeadingLevel.HEADING_2:undefined,spacing:{after:100}}));const doc=new Document({sections:[{properties:{},children}]});const blob=await Packer.toBlob(doc);const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='Nicholas-Laudani-Proposal-'+String(v().name||'Customer').replace(/[^a-z0-9]+/gi,'-')+'.docx';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1500)}
+document.querySelector('#wordProposal').onclick=downloadDocx;
+document.querySelector('#printPdf').onclick=()=>{buildDocument('both');const content=document.querySelector('#documentPreview').innerHTML,w=window.open('','_blank');w.document.write('<!doctype html><html><head><title>Nicholas Laudani Proposal</title><style>body{font:16px Arial,sans-serif;max-width:820px;margin:40px auto;padding:0 24px;color:#111}h3{border-bottom:1px solid #bbb;padding-bottom:8px}.quote-options{display:grid;grid-template-columns:1fr 1fr;gap:20px}.record-summary{display:grid;grid-template-columns:1fr 1fr;gap:8px 20px}.record-line{padding:5px 0;border-bottom:1px solid #ddd}.record-line b{display:block}@media print{button{display:none}}</style></head><body>'+content+'<script>window.onload=()=>window.print()<\/script></body></html>');w.document.close()};
