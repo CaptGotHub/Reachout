@@ -21,18 +21,18 @@
 </div></section>
 <div class="quote-actions"><button class="btn" id="createQuote" type="button">Create Quote</button><button class="btn" id="createProposal" type="button">Create Proposal</button><button class="btn primary" id="createBoth" type="button">Preview Both Choices</button></div>
 <div id="documentPreview" class="document-preview hidden"></div>
-<section class="send-panel"><p class="kicker">PROPOSAL PACKAGE</p><h3>What to include</h3>
+<section class="send-panel"><p class="kicker">PROPOSAL</p><h3>What to send</h3>
 <div class="package-options">
 <label class="checkline"><input type="checkbox" id="includeEmailBody" checked> Proposal in email body</label>
 <label class="checkline"><input type="checkbox" id="includeWord" checked> Attach Word proposal (.docx)</label>
 <label class="checkline"><input type="checkbox" id="includePdf"> PDF customer copy <button class="mini-action" id="printPdf" type="button">Open / Save PDF</button></label>
 </div>
-<details class="optional-docs"><summary>Optional documents</summary>
+<details class="optional-docs"><summary>Further forms & details</summary><p class="muted">Most customers won't need anything here. Open this only if a venue, company or organization asks for additional paperwork.</p>
 <label class="checkline unavailable"><input type="checkbox" id="includeW9" disabled> Attach W-9 <small id="w9State">Not installed — upload your real W-9 once.</small></label>
 <label class="checkline unavailable"><input type="checkbox" id="includeCoi" disabled> Attach Certificate of Insurance (COI) <small id="coiState">Not installed — upload the current certificate when needed.</small></label>
-<label>COI / insurance note<input id="insuranceNote" placeholder="Venue-specific requirement, additional insured, etc."></label>
+<label>Other form or detail needed<input id="insuranceNote" placeholder="Only if requested"></label>
 </details>
-<p class="kicker">DISTRIBUTION</p><h3>Where this will go</h3>
+<p class="kicker">SEND / COPY</p><h3>Send the proposal</h3>
 <label class="checkline"><input type="checkbox" checked disabled> Thumbtack conversation <small>outbound API not connected yet</small></label>
 <label class="checkline"><input type="checkbox" checked disabled> Copy to Nick — studio@spinstream.xyz <small>email sender not connected yet</small></label>
 <label class="checkline"><input id="sendCustomerEmail" type="checkbox"> Customer email <input id="customerEmail" type="email" placeholder="prefilled when supplied"></label>
