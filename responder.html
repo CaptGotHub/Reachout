@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Fast Responder | ReachOut Answer</title><link rel="stylesheet" href="styles.css"></head><body>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Fast Responder | ReachOut Answer</title><link rel="stylesheet" href="styles.css"><script src="https://cdn.jsdelivr.net/npm/docx@9.5.1/dist/index.umd.cjs"></script></head><body>
 <header><div class="wrap nav"><a class="brand" href="index.html">ReachOut <b>Answer</b></a><nav><a href="responder.html">Fast Responder</a><a href="index.html#book">Calendar</a></nav></div></header>
 <main class="wrap section"><p class="kicker">PRIVATE WORKSPACE · FAST RESPONDER</p><h1 class="dash-title">Answer while the lead is still looking.</h1>
 <div class="security">LIVE INBOX CONNECTED · Authentication is still required before treating this URL as a secure private CRM.</div>
@@ -25,18 +25,18 @@
 <div class="package-options">
 <label class="checkline"><input type="checkbox" id="includeEmailBody" checked> Proposal in email body</label>
 <label class="checkline"><input type="checkbox" id="includeWord" checked> Attach Word proposal (.docx)</label>
-<label class="checkline"><input type="checkbox" id="includePdf"> Attach PDF proposal</label>
+<label class="checkline"><input type="checkbox" id="includePdf"> PDF customer copy <button class="mini-action" id="printPdf" type="button">Open / Save PDF</button></label>
 </div>
 <details class="optional-docs"><summary>Optional documents</summary>
-<label class="checkline"><input type="checkbox" id="includeW9"> Attach W-9</label>
-<label class="checkline"><input type="checkbox" id="includeCoi"> Attach Certificate of Insurance (COI) <small>Usually only when requested by a venue or organization.</small></label>
+<label class="checkline unavailable"><input type="checkbox" id="includeW9" disabled> Attach W-9 <small id="w9State">Not installed — upload your real W-9 once.</small></label>
+<label class="checkline unavailable"><input type="checkbox" id="includeCoi" disabled> Attach Certificate of Insurance (COI) <small id="coiState">Not installed — upload the current certificate when needed.</small></label>
 <label>COI / insurance note<input id="insuranceNote" placeholder="Venue-specific requirement, additional insured, etc."></label>
 </details>
 <p class="kicker">DISTRIBUTION</p><h3>Where this will go</h3>
 <label class="checkline"><input type="checkbox" checked disabled> Thumbtack conversation <small>outbound API not connected yet</small></label>
 <label class="checkline"><input type="checkbox" checked disabled> Copy to Nick — studio@spinstream.xyz <small>email sender not connected yet</small></label>
 <label class="checkline"><input id="sendCustomerEmail" type="checkbox"> Customer email <input id="customerEmail" type="email" placeholder="prefilled when supplied"></label>
-<div class="actions"><button class="btn primary" id="copyPackage" type="button">Copy Complete Package</button><button class="btn" id="wordProposal" type="button">Generate Word Proposal</button><button class="btn" type="button" disabled title="Enable after Thumbtack outbound authorization">Send Both — connection required</button></div><p class="muted">Word export is prepared from the finished customer view; the server-side .docx generator is the next connection.</p>
+<div class="actions"><button class="btn primary" id="copyPackage" type="button">Copy Complete Package</button><button class="btn" id="wordProposal" type="button">Download Word Proposal (.docx)</button><button class="btn" type="button" disabled title="Enable after Thumbtack outbound authorization">Send Both — connection required</button></div><p class="muted">Word and PDF controls create real customer copies. W-9 and COI stay unavailable until the actual documents are installed.</p>
 </section></form>
 <section class="panel answer-pane"><div class="answer-top"><div><p class="kicker">ANSWER READY</p><h2>Review before sending</h2></div><span id="availBadge" class="status unknown">UNKNOWN</span></div><div id="missing" class="missing"></div><textarea id="fastAnswer" rows="16" placeholder="Your prepared response will appear here."></textarea><div class="actions"><button id="copyFast" class="btn primary">Copy answer</button><button id="markSent" class="btn">Mark sent</button></div><p class="muted">Thumbtack SEND becomes active only after its webhook/message API is connected server-side.</p></section></section></div></section>
 <section class="panel calendar-model"><p class="kicker">REACHOUT CALENDAR</p><h2>One calendar, several kinds of time.</h2><div class="calendar-types"><span>🎹 GIG / EVENT</span><span>🎓 PIANO LESSON</span><span>☎ CLIENT CALL</span><span>✦ SPINSTREAM CONSULT</span><span>⌂ RENTAL / SHOWING</span><span>⛔ PERSONAL / BLOCKED</span><span>↔ TRAVEL / SETUP BUFFER</span></div></section>
