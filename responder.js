@@ -112,28 +112,65 @@ async function openLead(id){
   setField('rentalEnd',toDateInput(L.rentalEnd||L.endDate||L.moveOut||L.move_out||L.requestedEnd||''));
   setField('rentalProperty',L.rentalProperty||L.property||L.listing||''); setField('occupants',L.occupants||L.occupantCount||'');
   setField('pets',L.pets||L.petInfo||''); setField('rentalBudget',L.rentalBudget||L.monthlyBudget||L.rateQuestion||'');
-  setField('rentalCall',L.rentalCall||L.wantsCall||'TBD'); setField('rentalQuestions',L.rentalQuestions||L.questions||'');
+  setField('rentalCall',L.rentalCall||L.wantsCall||'TBD'); setField('rentalReplyFocus',L.rentalReplyFocus||'Auto-detect'); setField('rentalQuestions',L.rentalQuestions||L.questions||'');
   setField('spinTopic',L.spinTopic||L.topic||'TBD'); setField('spinAIN',L.ain||L.AIN||''); setField('spinMintId',L.mintId||L.mint_id||'');
   setField('spinTier',L.tier||L.productTier||''); setField('spinQuestion',L.spinQuestion||L.question||'');
   availability=L.calendarStatus||'UNKNOWN'; setAvailability(availability); out.value=L.suggestedResponse||'';
   missingBox.innerHTML=(L.missing&&L.missing.length)?'<b>Still useful to ask:</b> '+L.missing.map(esc).join(' · '):'<b>Lead loaded. Review only what this customer actually needs.</b>';
   applyLeadContext(L);
 }
-function setSelect(name,value){if(!value)return;const el=f.elements[name];for(const o of el.options){if(o.value.toLowerCase()===String(value).toLowerCase()){el.value=o.value;return}}}function toDateInput(x){if(!x)return'';const m=String(x).match(/\d{4}-\d{2}-\d{2}/);return m?m[0]:''}function toTimeInput(x){if(!x)return'';const m=String(x).match(/(\d{2}):(\d{2})/);return m?m[1]+':'+m[2]:''}function setAvailability(val){availability=val;document.querySelectorAll('[data-avail]').forEach(b=>b.classList.toggle('selected',normalizeAvail(b.dataset.avail)===normalizeAvail(val)));badge.textContent=val;badge.className='status '+String(val).toLowerCase().replaceAll(' ','-').replaceAll('/','-')}function normalizeAvail(x){return String(x).replaceAll(' / ','_').replaceAll(' ','_').toUpperCase()}document.querySelectorAll('[data-avail]').forEach(b=>b.onclick=()=>setAvailability(b.dataset.avail));f.onsubmit=e=>{
+function setSelect(name,value){if(!value)return;const el=f.elements[name];for(const o of el.options){if(o.value.toLowerCase()===String(value).toLowerCase()){el.value=o.value;return}}}function toDateInput(x){if(!x)return'';const m=String(x).match(/\d{4}-\d{2}-\d{2}/);return m?m[0]:''}function toTimeInput(x){if(!x)return'';const m=String(x).match(/(\d{2}):(\d{2})/);return m?m[1]+':'+m[2]:''}function setAvailability(val){availability=val;document.querySelectorAll('[data-avail]').forEach(b=>b.classList.toggle('selected',normalizeAvail(b.dataset.avail)===normalizeAvail(val)));badge.textContent=val;badge.className='status '+String(val).toLowerCase().replaceAll(' ','-').replaceAll('/','-')}function normalizeAvail(x){return String(x).replaceAll(' / ','_').replaceAll(' ','_').toUpperCase()}
+function rentalLeadText(d){return [d.message,d.rentalQuestions,d.rentalBudget,d.rentalProperty].filter(Boolean).join(' ').toLowerCase()}
+function detectRentalReplyFocus(d){
+  const explicit=String(d.rentalReplyFocus||'Auto-detect');
+  if(explicit && explicit!=='Auto-detect')return explicit;
+  const hay=rentalLeadText(d);
+  if(d.rentalCall==='Yes'||/\b(call|phone|talk|speak)\b/.test(hay))return 'Call request';
+  if(/deposit|move[- ]?in cost|move[- ]?in fee|security|prorat|first month|last month|fees?/.test(hay))return 'Move-in costs / deposits';
+  if(/flexib|budget|monthly rate|rate\b|price|\b1900\b/.test(hay))return 'Rate / budget';
+  if(/available|availability|still available|would .* possible|is .* possible|move[- ]?in|move[- ]?out|start date|end date|dates?/.test(hay))return 'Dates / availability';
+  if(/pet.?friendly|pets? allowed|cat.?ok|dog.?ok|okay with .*pet|allow .*pet/.test(hay))return 'Pets';
+  if(d.rentalStart||d.rentalEnd)return 'Dates / availability';
+  return 'General';
+}
+function buildRentalQuickAnswer(d){
+  const name=d.name||'there',start=d.rentalStart||d.date,end=d.rentalEnd,focus=detectRentalReplyFocus(d),missing=[];
+  if(!start)missing.push('requested start date');
+  if(!end)missing.push('intended end date');
+  let s='Hi '+name+' — thanks for reaching out.';
+  if(start&&end)s+=' I have your requested stay as '+niceDate(start)+' through '+niceDate(end)+'.';
+  else if(start)s+=' I have your requested start as '+niceDate(start)+'.';
+  if(d.occupants)s+=' I noted '+d.occupants+' occupant'+(String(d.occupants)==='1'?'':'s')+'.';
+  if(d.pets)s+=' I noted the pet information as '+d.pets+'.';
+  if(focus==='Call request'){
+    s+=' I’d be glad to talk it through. Send me a couple of times that work for a quick call.';
+  }else if(focus==='Rate / budget'){
+    s+=' I saw your question about the monthly rate or budget. If you have a monthly budget in mind, send it over and I can review it with the dates and details.';
+  }else if(focus==='Move-in costs / deposits'){
+    s+=' I saw your question about move-in costs, deposits, fees, or proration. I want to verify the exact terms before quoting anything, so I’ll confirm those details separately.';
+  }else if(focus==='Pets'){
+    s+=' Thanks for including the pet information. I’ll review that along with the dates and the rest of the rental details.';
+  }else if(focus==='Dates / availability'){
+    if(start&&end)s+=' I’m checking those dates before confirming availability.';
+    else s+=' I’m checking the timing, and I just need the missing date information before I can confirm anything.';
+  }else{
+    s+=' I’m reviewing the dates and details now.';
+  }
+  if(missing.length){
+    s+=(focus==='Call request'?' Also, could you send me the ':' Could you send me the ')+missing.join(' and ')+'?';
+  }
+  if((d.rentalCall==='Yes'||d.offerCall==='Yes') && focus!=='Call request'){
+    s+=' If a call is easier, send me a couple of times that work.';
+  }
+  s+='\n\nNick Laudani\n617-233-2008';
+  return {text:s,focus,missing};
+}document.querySelectorAll('[data-avail]').forEach(b=>b.onclick=()=>setAvailability(b.dataset.avail));f.onsubmit=e=>{
   e.preventDefault(); const d=v(),workspace=selectedWorkspace();
   if(workspace==='Rentals'){
-    const missing=[],start=d.rentalStart||d.date,end=d.rentalEnd;
-    if(!start)missing.push('requested start date'); if(!end)missing.push('intended end date');
-    missingBox.innerHTML=missing.length?'<b>Still useful to ask:</b> '+missing.join(' · '):'<b>Rental dates captured. Do not promise availability until checked.</b>';
-    let s='Hi '+(d.name||'there')+' — thanks for reaching out about the rental.';
-    if(start&&end)s+=' I have your requested stay as '+niceDate(start)+' through '+niceDate(end)+'.';
-    else if(start)s+=' I have your requested start as '+niceDate(start)+'.';
-    if(d.occupants)s+=' I noted '+d.occupants+' occupant'+(String(d.occupants)==='1'?'':'s')+'.';
-    if(d.pets)s+=' I also noted the pet information: '+d.pets+'.';
-    s+=' I’m reviewing the dates and details now.';
-    if(missing.length)s+=' Could you send me the '+missing.join(' and ')+'?';
-    if(d.rentalCall==='Yes'||d.offerCall==='Yes')s+=' If you would like to talk, send me a couple of times that work for a quick call.';
-    s+='\n\nNick Laudani\n617-233-2008'; out.value=s; return;
+    const rental=buildRentalQuickAnswer(d);
+    missingBox.innerHTML=(rental.missing.length?'<b>Still useful to ask:</b> '+rental.missing.join(' · '):'<b>Quick-answer focus:</b> '+rental.focus);
+    out.value=rental.text;
+    return;
   }
   if(workspace==='SpinStream / NFArtifact'){
     const topic=d.spinTopic&&d.spinTopic!=='TBD'?d.spinTopic:'your SpinStream / NFArtifact question';
