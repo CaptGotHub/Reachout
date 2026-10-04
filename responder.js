@@ -17,7 +17,7 @@ function apiHeaders(extra={}){const t=adminToken();return {...extra,...(t?{Autho
 async function apiFetch(url,opts={}){
   opts={...opts,headers:apiHeaders(opts.headers||{})};
   return fetch(url,opts);
-}const f=document.querySelector('#fastLead'),out=document.querySelector('#fastAnswer'),badge=document.querySelector('#availBadge'),missingBox=document.querySelector('#missing');let availability='UNKNOWN',activeHub='ALL',allLeads=[],activeLeadId=null;
+}const f=document.querySelector('#fastLead'),out=document.querySelector('#fastAnswer'),badge=document.querySelector('#availBadge'),missingBox=document.querySelector('#missing');let availability='UNKNOWN',activeHub='ALL',allLeads=[],activeLeadId=null,activeReplyTo='';
 function setAuthButtons(unlocked){
   const unlock=document.querySelector('#unlockInbox'),lock=document.querySelector('#lockInbox');
   if(unlock) unlock.hidden=unlocked;
@@ -38,7 +38,129 @@ function lockInbox(){
   const list=document.querySelector('#sourceLeadList');
   if(list) list.innerHTML='<p class="muted">Inbox locked. Click Unlock inbox to enter your private token.</p>';
   const count=document.querySelector('#leadCount'); if(count) count.textContent='0';
-}const v=()=>Object.fromEntries(new FormData(f).entries());const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));function niceDate(x){return x?new Date(x+'T12:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}):''}function niceTime(x){if(!x)return'';let [h,m]=String(x).split(':').map(Number);if(Number.isNaN(h))return x;return new Date(2000,0,1,h,m||0).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}async function loadLeads(){const list=document.querySelector('#sourceLeadList');if(!adminToken()){setAuthButtons(false);setSecurityStatus('LEAD API PROTECTED · Private inbox locked.');list.innerHTML='<p class="muted">Inbox locked. Click Unlock inbox to enter your private token.</p>';return;}setSecurityStatus('LEAD API PROTECTED · Checking private access…');list.innerHTML='<p class="muted">Loading live leads…</p>';try{const r=await apiFetch(API+'/api/leads',{cache:'no-store'}),d=await r.json();if(!r.ok){if(r.status===401){sessionStorage.removeItem(TOKEN_KEY);setAuthButtons(false);setSecurityStatus('PRIVATE INBOX LOCKED · Token not accepted.');}throw new Error(r.status===401?'Unauthorized — click Unlock inbox and enter the current raw admin token.':(d.error||'API error'))}allLeads=d.leads||[];setAuthButtons(true);setSecurityStatus('PRIVATE INBOX CONNECTED · Lead API authenticated.');renderHub()}catch(e){list.innerHTML='<p class="api-error">Could not load ReachOut inbox: '+esc(e.message)+'</p>'}}function renderHub(){const rows=allLeads.filter(x=>activeHub==='ALL'||String(x.source).toUpperCase()===activeHub);document.querySelector('#hubTitle').textContent=activeHub==='ALL'?'All Leads':activeHub;document.querySelector('#leadCount').textContent=rows.length;document.querySelector('#sourceLeadList').innerHTML=rows.map(x=>'<button class="lead-row '+(x.id===activeLeadId?'selected':'')+'" data-id="'+esc(x.id)+'"><span class="lead-source">'+esc(x.source)+'</span><b>'+esc(x.name||'New lead')+'</b><small>'+esc([x.requestType,niceDate(x.eventDate),x.location].filter(Boolean).join(' · '))+'</small><em>'+esc(x.status||'NEW')+' · '+esc(x.calendarStatus||'UNKNOWN')+'</em></button>').join('')||'<p class="muted">No leads in this queue yet.</p>';document.querySelectorAll('.lead-row[data-id]').forEach(b=>b.onclick=()=>openLead(b.dataset.id))}async function openLead(id){activeLeadId=id;renderHub();const r=await apiFetch(API+'/api/leads/'+encodeURIComponent(id),{cache:'no-store'}),d=await r.json();if(!r.ok)return;const L=d.lead||{};f.elements.name.value=L.name||L.firstName||'';if(f.elements.email)f.elements.email.value=L.email||'';if(f.elements.phone)f.elements.phone.value=L.phone||'';if(f.elements.venueContact)f.elements.venueContact.value=L.venueContact||'';if(f.elements.guestCount)f.elements.guestCount.value=L.guestCount||'';if(f.elements.guestAge)f.elements.guestAge.value=L.guestAge||'';if(f.elements.musicType)f.elements.musicType.value=L.musicType||'';if(f.elements.budget)f.elements.budget.value=L.budget||'';if(f.elements.travelPreference)f.elements.travelPreference.value=L.travelPreference||'';if(f.elements.thumbtackPrice)f.elements.thumbtackPrice.value=L.thumbtackPrice||'';if(f.elements.leadCost)f.elements.leadCost.value=L.leadCost||'';if(f.elements.competition)f.elements.competition.value=L.competition||'';if(f.elements.included)f.elements.included.value=L.included||'';setSelect('request',L.requestType);f.elements.date.value=toDateInput(L.eventDate);f.elements.location.value=typeof L.location==='string'?L.location:'';f.elements.start.value=toTimeInput(L.startTime);f.elements.end.value=toTimeInput(L.endTime);setSelect('musicians',L.musicians);f.elements.style.value=L.style||'';f.elements.message.value=L.message||'';availability=L.calendarStatus||'UNKNOWN';setAvailability(availability);out.value=L.suggestedResponse||'';missingBox.innerHTML=(L.missing&&L.missing.length)?'<b>Still useful to ask:</b> '+L.missing.map(esc).join(' · '):'<b>Core event details present.</b>';document.querySelector('#workspace').value='Live Music';document.querySelector('#source').value='Thumbtack'}function setSelect(name,value){if(!value)return;const el=f.elements[name];for(const o of el.options){if(o.value.toLowerCase()===String(value).toLowerCase()){el.value=o.value;return}}}function toDateInput(x){if(!x)return'';const m=String(x).match(/\d{4}-\d{2}-\d{2}/);return m?m[0]:''}function toTimeInput(x){if(!x)return'';const m=String(x).match(/(\d{2}):(\d{2})/);return m?m[1]+':'+m[2]:''}function setAvailability(val){availability=val;document.querySelectorAll('[data-avail]').forEach(b=>b.classList.toggle('selected',normalizeAvail(b.dataset.avail)===normalizeAvail(val)));badge.textContent=val;badge.className='status '+String(val).toLowerCase().replaceAll(' ','-').replaceAll('/','-')}function normalizeAvail(x){return String(x).replaceAll(' / ','_').replaceAll(' ','_').toUpperCase()}document.querySelectorAll('[data-avail]').forEach(b=>b.onclick=()=>setAvailability(b.dataset.avail));f.onsubmit=e=>{e.preventDefault();const d=v(),miss=[];if(!d.date)miss.push('date');if(!d.location)miss.push('location / venue');if(!d.start||!d.end)miss.push('event start / end time');if(d.musicians==='Not sure')miss.push('musician setup');missingBox.innerHTML=miss.length?'<b>Still useful to ask:</b> '+miss.join(' · '):'<b>Core event details present.</b>';let s='Hi '+(d.name||'there')+' — thanks for reaching out about your '+d.request.toLowerCase()+'.';if(d.date)s+=' I have '+niceDate(d.date);if(d.start&&d.end)s+=' from '+niceTime(d.start)+' to '+niceTime(d.end);if(d.location)s+=' in '+d.location;s+='.';if(d.style)s+=' '+d.style+' sounds like a good direction.';if(d.musicians&&d.musicians!=='Not sure')s+=' I see you are considering '+d.musicians.toLowerCase()+'.';if(d.message)s+=' I also saw your note about '+d.message.trim()+'.';if(availability==='OPEN')s+=' That requested time currently appears open on my calendar.';else if(availability==='CONFLICT')s+=' I do have a calendar conflict during that requested time, so I would want to see whether there is any flexibility before promising availability.';else if(normalizeAvail(availability).includes('TRAVEL'))s+=' The date may be possible, but I need to check travel and setup timing before confirming it.';else s+=' I still need to confirm the requested time against my calendar before promising availability.';if(miss.length)s+=' To put the right setup together, could you also send me the '+miss.join(', ')+'?';else s+=' I have the basic event details and can put together the right setup and quote.';if(d.offerCall==='Yes')s+=' If you would like to talk it through, '+(d.callTime?'I can also try '+d.callTime+'.':'we can find a good time for a quick call.');if(d.fee)s+=' The fee I am quoting is $'+d.fee+'.';if(d.deposit)s+=' The deposit would be '+d.deposit+'.';s+='\n\nNick Laudani\n617-233-2008';out.value=s};document.querySelector('#copyFast').onclick=async()=>{await navigator.clipboard.writeText(out.value);document.querySelector('#copyFast').textContent='Copied'};document.querySelector('#markSent').onclick=async()=>{if(!activeLeadId){document.querySelector('#markSent').textContent='No lead selected';return}const r=await apiFetch(API+'/api/leads/'+encodeURIComponent(activeLeadId),{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({status:'WAITING',calendarStatus:normalizeAvail(availability),eventDate:f.elements.date.value,startTime:f.elements.start.value,endTime:f.elements.end.value,location:f.elements.location.value,musicians:f.elements.musicians.value,style:f.elements.style.value,message:f.elements.message.value,fee:f.elements.fee.value||null,deposit:f.elements.deposit.value||null})});document.querySelector('#markSent').textContent=r.ok?'Marked waiting':'Update failed';if(r.ok)loadLeads()};document.querySelectorAll('[data-hub]').forEach(b=>b.onclick=()=>{activeHub=b.dataset.hub;document.querySelectorAll('[data-hub]').forEach(x=>x.classList.remove('active'));b.classList.add('active');renderHub()});document.querySelector('#unlockInbox')?.addEventListener('click',unlockInbox);document.querySelector('#lockInbox')?.addEventListener('click',lockInbox);loadLeads();setInterval(()=>{if(adminToken())loadLeads()},5000);window.addEventListener('focus',()=>{if(adminToken())loadLeads()});
+}const v=()=>Object.fromEntries(new FormData(f).entries());const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));function niceDate(x){return x?new Date(x+'T12:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}):''}function niceTime(x){if(!x)return'';let [h,m]=String(x).split(':').map(Number);if(Number.isNaN(h))return x;return new Date(2000,0,1,h,m||0).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}function canonicalSource(raw){
+  const s=String(raw||'').trim(),u=s.toUpperCase();
+  if(u.includes('FURNISH'))return 'Furnished Finder';
+  if(u.includes('THUMBTACK'))return 'Thumbtack';
+  if(u.includes('WEBSITE')||u==='WEB')return 'Website';
+  if(u.includes('EMAIL')||u.includes('GMAIL'))return 'Email';
+  if(['THUMBTACK','WEBSITE','EMAIL','FURNISHED FINDER','OTHER'].includes(u))return u==='FURNISHED FINDER'?'Furnished Finder':u.charAt(0)+u.slice(1).toLowerCase();
+  return 'Other';
+}
+function inferSource(L={}){
+  return canonicalSource(L.source||L.leadSource||L.lead_source||L.channel||L.origin||L.sourceName||'');
+}
+function inferWorkspace(L={}){
+  const explicit=String(L.workspace||L.workspaceName||L.business||'').toLowerCase();
+  if(explicit.includes('rent')||explicit.includes('furnish'))return 'Rentals';
+  if(explicit.includes('spin')||explicit.includes('nfartifact'))return 'SpinStream / NFArtifact';
+  if(explicit.includes('music')||explicit.includes('lesson'))return 'Live Music';
+  const hay=[L.requestType,L.serviceName,L.service_name,L.message,L.customerMessage,L.subject,inferSource(L)].filter(Boolean).join(' ').toLowerCase();
+  if(/furnish|rental|tenant|housing|lease|studio|apartment/.test(hay))return 'Rentals';
+  if(/spinstream|nfartifact|ain-|spin-|proof|dossier|mint/.test(hay))return 'SpinStream / NFArtifact';
+  if(/music|wedding|cocktail|party|piano|lesson|band|musician|event/.test(hay))return 'Live Music';
+  return 'All';
+}
+function leadMatchesHub(L,hub){
+  if(hub==='ALL')return true;
+  if(hub==='SPINSTREAM / NFARTIFACT')return inferWorkspace(L)==='SpinStream / NFArtifact';
+  if(hub==='FURNISHED FINDER')return inferSource(L)==='Furnished Finder'||inferWorkspace(L)==='Rentals';
+  return inferSource(L).toUpperCase()===hub;
+}
+function setField(name,value){
+  const el=f.elements[name]; if(!el||value===undefined||value===null)return; el.value=String(value);
+}
+function selectedWorkspace(){return document.querySelector('#workspace')?.value||'All'}
+function selectedSource(){return document.querySelector('#source')?.value||'Other'}
+function syncContextLabels(){
+  const src=selectedSource(),label=document.querySelector('#sourceSendLabel'),state=document.querySelector('#sourceSendState');
+  if(label)label.textContent=src+' conversation';
+  if(state)state.textContent=src==='Thumbtack'?'outbound API not connected yet':src==='Furnished Finder'?'email/API reply bridge not connected yet':'outbound connection not connected yet';
+}
+function applyLeadContext(L){
+  const workspace=inferWorkspace(L),source=inferSource(L);
+  const w=document.querySelector('#workspace'),s=document.querySelector('#source');
+  if(w&&[...w.options].some(o=>o.value===workspace))w.value=workspace;
+  if(s&&[...s.options].some(o=>o.value===source))s.value=source;
+  syncContextLabels(); toggleLeadMode();
+}
+async function loadLeads(){const list=document.querySelector('#sourceLeadList');if(!adminToken()){setAuthButtons(false);setSecurityStatus('LEAD API PROTECTED · Private inbox locked.');list.innerHTML='<p class="muted">Inbox locked. Click Unlock inbox to enter your private token.</p>';return;}setSecurityStatus('LEAD API PROTECTED · Checking private access…');list.innerHTML='<p class="muted">Loading live leads…</p>';try{const r=await apiFetch(API+'/api/leads',{cache:'no-store'}),d=await r.json();if(!r.ok){if(r.status===401){sessionStorage.removeItem(TOKEN_KEY);setAuthButtons(false);setSecurityStatus('PRIVATE INBOX LOCKED · Token not accepted.');}throw new Error(r.status===401?'Unauthorized — click Unlock inbox and enter the current raw admin token.':(d.error||'API error'))}allLeads=d.leads||[];setAuthButtons(true);setSecurityStatus('PRIVATE INBOX CONNECTED · Lead API authenticated.');renderHub()}catch(e){list.innerHTML='<p class="api-error">Could not load ReachOut inbox: '+esc(e.message)+'</p>'}}function renderHub(){
+  const rows=allLeads.filter(x=>leadMatchesHub(x,activeHub));
+  document.querySelector('#hubTitle').textContent=activeHub==='ALL'?'All Leads':activeHub;
+  document.querySelector('#leadCount').textContent=rows.length;
+  document.querySelector('#sourceLeadList').innerHTML=rows.map(x=>{
+    const src=inferSource(x),workspace=inferWorkspace(x);
+    return '<button class="lead-row '+(x.id===activeLeadId?'selected':'')+'" data-id="'+esc(x.id)+'"><span class="lead-source">'+esc(src)+' · '+esc(workspace)+'</span><b>'+esc(x.name||'New lead')+'</b><small>'+esc([x.requestType,niceDate(x.eventDate||x.rentalStart||x.startDate),x.location||x.property].filter(Boolean).join(' · '))+'</small><em>'+esc(x.status||'NEW')+' · '+esc(x.calendarStatus||'UNKNOWN')+'</em></button>';
+  }).join('')||'<p class="muted">No leads in this queue yet.</p>';
+  document.querySelectorAll('.lead-row[data-id]').forEach(b=>b.onclick=()=>openLead(b.dataset.id));
+}
+async function openLead(id){
+  activeLeadId=id; renderHub();
+  const r=await apiFetch(API+'/api/leads/'+encodeURIComponent(id),{cache:'no-store'}),d=await r.json(); if(!r.ok)return;
+  const L=d.lead||{};
+  activeReplyTo=L.replyTo||L.reply_to||L.replyRecipient||L.reply_recipient||'';
+  setField('name',L.name||L.firstName||L.customerName||'');
+  setField('email',L.email||''); setField('phone',L.phone||''); setField('venueContact',L.venueContact||'');
+  setField('guestCount',L.guestCount||''); setField('guestAge',L.guestAge||''); setField('musicType',L.musicType||'');
+  setField('budget',L.budget||''); setField('travelPreference',L.travelPreference||''); setField('thumbtackPrice',L.thumbtackPrice||'');
+  setField('leadCost',L.leadCost||''); setField('competition',L.competition||''); setField('included',L.included||'');
+  setSelect('request',L.requestType||L.request||'');
+  setField('date',toDateInput(L.eventDate||L.date||'')); setField('location',typeof L.location==='string'?L.location:(L.property||''));
+  setField('start',toTimeInput(L.startTime||'')); setField('end',toTimeInput(L.endTime||'')); setSelect('musicians',L.musicians);
+  setField('style',L.style||''); setField('message',L.message||L.customerMessage||'');
+  setField('rentalStart',toDateInput(L.rentalStart||L.startDate||L.moveIn||L.move_in||L.requestedStart||''));
+  setField('rentalEnd',toDateInput(L.rentalEnd||L.endDate||L.moveOut||L.move_out||L.requestedEnd||''));
+  setField('rentalProperty',L.rentalProperty||L.property||L.listing||''); setField('occupants',L.occupants||L.occupantCount||'');
+  setField('pets',L.pets||L.petInfo||''); setField('rentalBudget',L.rentalBudget||L.monthlyBudget||L.rateQuestion||'');
+  setField('rentalCall',L.rentalCall||L.wantsCall||'TBD'); setField('rentalQuestions',L.rentalQuestions||L.questions||'');
+  setField('spinTopic',L.spinTopic||L.topic||'TBD'); setField('spinAIN',L.ain||L.AIN||''); setField('spinMintId',L.mintId||L.mint_id||'');
+  setField('spinTier',L.tier||L.productTier||''); setField('spinQuestion',L.spinQuestion||L.question||'');
+  availability=L.calendarStatus||'UNKNOWN'; setAvailability(availability); out.value=L.suggestedResponse||'';
+  missingBox.innerHTML=(L.missing&&L.missing.length)?'<b>Still useful to ask:</b> '+L.missing.map(esc).join(' · '):'<b>Lead loaded. Review only what this customer actually needs.</b>';
+  applyLeadContext(L);
+}
+function setSelect(name,value){if(!value)return;const el=f.elements[name];for(const o of el.options){if(o.value.toLowerCase()===String(value).toLowerCase()){el.value=o.value;return}}}function toDateInput(x){if(!x)return'';const m=String(x).match(/\d{4}-\d{2}-\d{2}/);return m?m[0]:''}function toTimeInput(x){if(!x)return'';const m=String(x).match(/(\d{2}):(\d{2})/);return m?m[1]+':'+m[2]:''}function setAvailability(val){availability=val;document.querySelectorAll('[data-avail]').forEach(b=>b.classList.toggle('selected',normalizeAvail(b.dataset.avail)===normalizeAvail(val)));badge.textContent=val;badge.className='status '+String(val).toLowerCase().replaceAll(' ','-').replaceAll('/','-')}function normalizeAvail(x){return String(x).replaceAll(' / ','_').replaceAll(' ','_').toUpperCase()}document.querySelectorAll('[data-avail]').forEach(b=>b.onclick=()=>setAvailability(b.dataset.avail));f.onsubmit=e=>{
+  e.preventDefault(); const d=v(),workspace=selectedWorkspace();
+  if(workspace==='Rentals'){
+    const missing=[],start=d.rentalStart||d.date,end=d.rentalEnd;
+    if(!start)missing.push('requested start date'); if(!end)missing.push('intended end date');
+    missingBox.innerHTML=missing.length?'<b>Still useful to ask:</b> '+missing.join(' · '):'<b>Rental dates captured. Do not promise availability until checked.</b>';
+    let s='Hi '+(d.name||'there')+' — thanks for reaching out about the rental.';
+    if(start&&end)s+=' I have your requested stay as '+niceDate(start)+' through '+niceDate(end)+'.';
+    else if(start)s+=' I have your requested start as '+niceDate(start)+'.';
+    if(d.occupants)s+=' I noted '+d.occupants+' occupant'+(String(d.occupants)==='1'?'':'s')+'.';
+    if(d.pets)s+=' I also noted the pet information: '+d.pets+'.';
+    s+=' I’m reviewing the dates and details now.';
+    if(missing.length)s+=' Could you send me the '+missing.join(' and ')+'?';
+    if(d.rentalCall==='Yes'||d.offerCall==='Yes')s+=' If you would like to talk, send me a couple of times that work for a quick call.';
+    s+='\n\nNick Laudani\n617-233-2008'; out.value=s; return;
+  }
+  if(workspace==='SpinStream / NFArtifact'){
+    const topic=d.spinTopic&&d.spinTopic!=='TBD'?d.spinTopic:'your SpinStream / NFArtifact question';
+    let s='Hi '+(d.name||'there')+' — thanks for reaching out about '+topic+'.';
+    if(d.spinAIN)s+=' I have the AIN as '+d.spinAIN+'.';
+    if(d.spinMintId)s+=' I have the Mint ID as '+d.spinMintId+'.';
+    if(d.spinTier)s+=' I noted '+d.spinTier+' as the tier or product involved.';
+    s+=' I received your question and can use those details to look at the right record or issue.';
+    if(d.offerCall==='Yes')s+=' If a call would be easier, send me a couple of times that work.';
+    s+='\n\nNick Laudani'; out.value=s; missingBox.innerHTML='<b>SpinStream workflow:</b> identify the record, tier and exact question before answering'; return;
+  }
+  const miss=[]; if(!d.date)miss.push('date'); if(!d.location)miss.push('location / venue'); if(!d.start||!d.end)miss.push('event start / end time'); if(d.musicians==='Not sure')miss.push('musician setup');
+  missingBox.innerHTML=miss.length?'<b>Still useful to ask:</b> '+miss.join(' · '):'<b>Core event details present.</b>';
+  let s='Hi '+(d.name||'there')+' — thanks for reaching out about your '+d.request.toLowerCase()+'.';
+  if(d.date)s+=' I have '+niceDate(d.date); if(d.start&&d.end)s+=' from '+niceTime(d.start)+' to '+niceTime(d.end); if(d.location)s+=' in '+d.location; s+='.';
+  if(d.style)s+=' '+d.style+' sounds like a good direction.'; if(d.musicians&&d.musicians!=='Not sure')s+=' I see you are considering '+d.musicians.toLowerCase()+'.';
+  if(d.message)s+=' I also saw your note about '+d.message.trim()+'.';
+  if(availability==='OPEN')s+=' That requested time currently appears open on my calendar.';
+  else if(availability==='CONFLICT')s+=' I do have a calendar conflict during that requested time, so I would want to see whether there is any flexibility before promising availability.';
+  else if(normalizeAvail(availability).includes('TRAVEL'))s+=' The date may be possible, but I need to check travel and setup timing before confirming it.';
+  else s+=' I still need to confirm the requested time against my calendar before promising availability.';
+  if(miss.length)s+=' To put the right setup together, could you also send me the '+miss.join(', ')+'?'; else s+=' I have the basic event details and can put together the right setup and quote.';
+  if(d.offerCall==='Yes')s+=' If you would like to talk it through, '+(d.callTime?'I can also try '+d.callTime+'.':'we can find a good time for a quick call.');
+  if(d.fee)s+=' The fee I am quoting is $'+d.fee+'.'; if(d.deposit)s+=' The deposit would be '+d.deposit+'.';
+  s+='\n\nNick Laudani\n617-233-2008'; out.value=s;
+};
+document.querySelector('#copyFast').onclick=async()=>{await navigator.clipboard.writeText(out.value);document.querySelector('#copyFast').textContent='Copied'};document.querySelector('#markSent').onclick=async()=>{if(!activeLeadId){document.querySelector('#markSent').textContent='No lead selected';return}const r=await apiFetch(API+'/api/leads/'+encodeURIComponent(activeLeadId),{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({status:'WAITING',calendarStatus:normalizeAvail(availability),eventDate:f.elements.date.value,startTime:f.elements.start.value,endTime:f.elements.end.value,location:f.elements.location.value,musicians:f.elements.musicians.value,style:f.elements.style.value,message:f.elements.message.value,fee:f.elements.fee.value||null,deposit:f.elements.deposit.value||null})});document.querySelector('#markSent').textContent=r.ok?'Marked waiting':'Update failed';if(r.ok)loadLeads()};document.querySelectorAll('[data-hub]').forEach(b=>b.onclick=()=>{activeHub=b.dataset.hub;document.querySelectorAll('[data-hub]').forEach(x=>x.classList.remove('active'));b.classList.add('active');renderHub()});document.querySelector('#unlockInbox')?.addEventListener('click',unlockInbox);document.querySelector('#lockInbox')?.addEventListener('click',lockInbox);loadLeads();setInterval(()=>{if(adminToken())loadLeads()},5000);window.addEventListener('focus',()=>{if(adminToken())loadLeads()});
 let setupCount=0;
 function addSetup(){
  setupCount++;
@@ -70,7 +192,11 @@ function choiceHTML(label,x){return '<div class="customer-choice"><h4>'+label+'<
 function syncCustomerEmailFromLead(){if(!activeLeadId)return;apiFetch(API+'/api/leads/'+encodeURIComponent(activeLeadId),{cache:'no-store'}).then(r=>r.json()).then(d=>{if(d.lead?.email)document.querySelector('#customerEmail').value=d.lead.email}).catch(()=>{})}
 const oldOpenLead=openLead;openLead=async function(id){await oldOpenLead(id);syncCustomerEmailFromLead()}
 const oldBuildDocument=buildDocument;buildDocument=function(mode){oldBuildDocument(mode);const box=document.querySelector('#documentPreview'),a=proposalChoice('a'),b=proposalChoice('b'),choices='<h3>PROPOSAL CHOICES</h3><div class="quote-options">'+choiceHTML('OPTION A',a)+choiceHTML('OPTION B',b)+'</div>';box.innerHTML=choices+box.innerHTML}
-document.querySelector('#copyPackage').onclick=async()=>{const preview=document.querySelector('#documentPreview').innerText.trim(),answer=document.querySelector('#fastAnswer').value.trim(),email=document.querySelector('#customerEmail').value.trim();const packageText=['REACHOUT ANSWER — COMPLETE CUSTOMER PACKAGE','',answer,'',preview,'','DISTRIBUTION','Thumbtack: planned','Nick copy: studio@spinstream.xyz','Customer email: '+(email||'TBD')].join('\n');await navigator.clipboard.writeText(packageText);document.querySelector('#copyPackage').textContent='Complete Package Copied'}
+document.querySelector('#copyPackage').onclick=async()=>{
+  const preview=document.querySelector('#documentPreview').innerText.trim(),answer=document.querySelector('#fastAnswer').value.trim(),email=document.querySelector('#customerEmail').value.trim();
+  const packageText=['REACHOUT ANSWER — COMPLETE CUSTOMER PACKAGE','','Workspace: '+selectedWorkspace(),'Source: '+selectedSource(),activeReplyTo?'Reply route: '+activeReplyTo:'','',answer,'',preview,'','DISTRIBUTION','Source outbound: connection dependent','Nick copy: studio@spinstream.xyz','Customer email: '+(email||'TBD')].filter(x=>x!==null&&x!==undefined).join('\n');
+  await navigator.clipboard.writeText(packageText); document.querySelector('#copyPackage').textContent='Complete Package Copied';
+}
 
 function completeRecordHTML(d){const show=(label,val)=>'<div class="record-line"><b>'+label+'</b><span>'+esc(val||'TBD')+'</span></div>';return '<h3>COMPLETE EVENT RECORD</h3><div class="record-summary">'+show('Customer',d.name)+show('Email',d.email)+show('Phone',d.phone)+show('Contact at venue',d.venueContact)+show('Event',d.request)+show('Date',d.date)+show('Venue / address',d.location)+show('Load-in',d.loadIn)+show('Start',d.start)+show('Finish',d.end)+show('Guest count',d.guestCount)+show('Guest age',d.guestAge)+show('Musicians',d.musicians)+show('Music type',d.musicType)+show('Genres / style',d.style)+show('Budget',d.budget)+show('Travel preference',d.travelPreference)+show('Thumbtack base / estimated price',d.thumbtackPrice)+show('Thumbtack lead cost',d.leadCost)+show('Competition',d.competition)+show("What's included",d.included)+show('Dress code',d.dressCode)+show('Food / drinks',d.foodDrink)+show('Sound needed',d.soundNeeded)+show('Sound provider',d.soundProvider)+show('Microphones',d.microphones)+show('Power',d.power)+show('Parking / load-in',d.parking)+show('Special instructions',d.specialInstructions)+show('Special songs',d.specialSongs)+'</div>'}
 const previousBuildDocument=buildDocument;buildDocument=function(mode){previousBuildDocument(mode);const box=document.querySelector('#documentPreview');box.innerHTML=completeRecordHTML(v())+box.innerHTML}
@@ -84,8 +210,22 @@ const buildBeforePro=buildDocument;buildDocument=function(mode){buildBeforePro(m
 
 
 function lessonMode(){const val=String(f.elements.request?.value||'').toLowerCase();return val.includes('lesson')}
-function toggleLeadMode(){const lesson=lessonMode();document.querySelector('#lessonSheet')?.classList.toggle('hidden',!lesson);document.querySelector('#eventSheet')?.classList.toggle('hidden',lesson);document.querySelector('.proposal-choices')?.classList.toggle('hidden',lesson);document.querySelector('.quote-actions')?.classList.toggle('hidden',lesson)}
-f.elements.request?.addEventListener('change',toggleLeadMode);toggleLeadMode();
+function rentalMode(){const req=String(f.elements.request?.value||'').toLowerCase();return selectedWorkspace()==='Rentals'||selectedSource()==='Furnished Finder'||req.includes('rental')}
+function spinMode(){const req=String(f.elements.request?.value||'').toLowerCase();return selectedWorkspace()==='SpinStream / NFArtifact'||req.includes('spinstream')}
+function toggleLeadMode(){
+  const rental=rentalMode(),spin=spinMode(),lesson=!rental&&!spin&&lessonMode(),event=!rental&&!spin&&!lesson;
+  document.querySelector('#rentalSheet')?.classList.toggle('hidden',!rental);
+  document.querySelector('#spinSheet')?.classList.toggle('hidden',!spin);
+  document.querySelector('#lessonSheet')?.classList.toggle('hidden',!lesson);
+  document.querySelector('#eventSheet')?.classList.toggle('hidden',!event);
+  document.querySelector('.proposal-choices')?.classList.toggle('hidden',!event);
+  document.querySelector('.quote-actions')?.classList.toggle('hidden',!event);
+  syncContextLabels();
+}
+f.elements.request?.addEventListener('change',toggleLeadMode);
+document.querySelector('#workspace')?.addEventListener('change',toggleLeadMode);
+document.querySelector('#source')?.addEventListener('change',e=>{if(e.target.value==='Furnished Finder')document.querySelector('#workspace').value='Rentals';toggleLeadMode()});
+toggleLeadMode();
 document.querySelector('#buildLessonAnswer').onclick=()=>{const d=v(),name=d.name||'there';let s='Hi '+name+' — thanks for reaching out about lessons. I’d be glad to learn a little about what you want to work on and see what kind of lesson setup makes the most sense.';if(d.lessonInstrument)s+=' I saw that you are interested in '+d.lessonInstrument+' lessons.';if(d.lessonFormat&&d.lessonFormat!=='TBD')s+=' '+d.lessonFormat+' can work as the lesson format.';if(d.lessonFrequency&&d.lessonFrequency!=='TBD')s+=' You indicated '+d.lessonFrequency.toLowerCase()+'.';if(d.studentLevel&&d.studentLevel!=='TBD')s+=' Your '+d.studentLevel.toLowerCase()+' level is helpful to know.';if(d.lessonGoals)s+=' I also saw that you would like to work on '+d.lessonGoals+'.';const missing=[];if(!d.lessonTimes||d.lessonTimes==='TBD')missing.push('days/times that work best');if(!d.lessonFormat||d.lessonFormat==='TBD')missing.push('whether you prefer in-person or online');if(missing.length)s+=' To figure out a good first lesson, let me know '+missing.join(' and ')+'.';else s+=' I can use those details to work out a good first lesson time.';s+='\n\nNick Laudani\n617-233-2008';out.value=s;missingBox.innerHTML='<b>Lesson workflow:</b> availability and first-lesson scheduling';out.scrollIntoView({behavior:'smooth'})};
 
 function proposalTextLines(){const d=v(),a=proposalChoice('a'),b=proposalChoice('b');return[
