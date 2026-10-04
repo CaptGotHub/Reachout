@@ -127,9 +127,10 @@ function detectRentalReplyFocus(d){
   const hay=rentalLeadText(d);
   if(d.rentalCall==='Yes'||/\b(call|phone|talk|speak)\b/.test(hay))return 'Call request';
   if(/deposit|move[- ]?in cost|move[- ]?in fee|security|prorat|first month|last month|fees?/.test(hay))return 'Move-in costs / deposits';
-  if(/flexib|budget|monthly rate|rate\b|rent\b|price/.test(hay))return 'Rate / budget';
-  if(/\b(pet|pets|dog|dogs|cat|cats)\b/.test(hay))return 'Pets';
-  if(d.rentalStart||d.rentalEnd||/available|availability|move[- ]?in|move[- ]?out|start date|end date|dates?/.test(hay))return 'Dates / availability';
+  if(/flexib|budget|monthly rate|rate\b|price|\b1900\b/.test(hay))return 'Rate / budget';
+  if(/available|availability|still available|would .* possible|is .* possible|move[- ]?in|move[- ]?out|start date|end date|dates?/.test(hay))return 'Dates / availability';
+  if(/pet.?friendly|pets? allowed|cat.?ok|dog.?ok|okay with .*pet|allow .*pet/.test(hay))return 'Pets';
+  if(d.rentalStart||d.rentalEnd)return 'Dates / availability';
   return 'General';
 }
 function buildRentalQuickAnswer(d){
@@ -155,8 +156,8 @@ function buildRentalQuickAnswer(d){
   }else{
     s+=' I’m reviewing the dates and details now.';
   }
-  if(missing.length && focus!=='Call request'){
-    s+=' Could you send me the '+missing.join(' and ')+'?';
+  if(missing.length){
+    s+=(focus==='Call request'?' Also, could you send me the ':' Could you send me the ')+missing.join(' and ')+'?';
   }
   if((d.rentalCall==='Yes'||d.offerCall==='Yes') && focus!=='Call request'){
     s+=' If a call is easier, send me a couple of times that work.';
