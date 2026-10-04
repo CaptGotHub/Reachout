@@ -17,7 +17,7 @@ function apiHeaders(extra={}){const t=adminToken();return {...extra,...(t?{Autho
 async function apiFetch(url,opts={}){
   opts={...opts,headers:apiHeaders(opts.headers||{})};
   return fetch(url,opts);
-}const f=document.querySelector('#fastLead'),out=document.querySelector('#fastAnswer'),badge=document.querySelector('#availBadge'),missingBox=document.querySelector('#missing');let availability='UNKNOWN',activeHub='ALL',allLeads=[],activeLeadId=null,activeReplyTo='';
+}const f=document.querySelector('#fastLead'),out=document.querySelector('#fastAnswer'),badge=document.querySelector('#availBadge'),missingBox=document.querySelector('#missing');let availability='UNKNOWN',activeHub='ALL',allLeads=[],activeLeadId=null,activeReplyTo='',activeDirectEmail='',activeReplyMode='';
 function setAuthButtons(unlocked){
   const unlock=document.querySelector('#unlockInbox'),lock=document.querySelector('#lockInbox');
   if(unlock) unlock.hidden=unlocked;
@@ -75,7 +75,19 @@ function selectedSource(){return document.querySelector('#source')?.value||'Othe
 function syncContextLabels(){
   const src=selectedSource(),label=document.querySelector('#sourceSendLabel'),state=document.querySelector('#sourceSendState');
   if(label)label.textContent=src+' conversation';
-  if(state)state.textContent=src==='Thumbtack'?'outbound API not connected yet':src==='Furnished Finder'?'email/API reply bridge not connected yet':'outbound connection not connected yet';
+  if(!state)return;
+  if(src==='Thumbtack'){state.textContent='outbound API not connected yet';return}
+  if(src==='Furnished Finder'){
+    if(activeReplyMode==='furnished_finder_conversation'){
+      state.textContent='primary: Furnished Finder conversation'+(activeDirectEmail?' · direct traveler email also stored':'');
+    }else if(activeReplyMode==='direct_email'){
+      state.textContent='no FF conversation reply route · direct traveler email available';
+    }else{
+      state.textContent='no verified email route · manual Furnished Finder reply required';
+    }
+    return;
+  }
+  state.textContent='outbound connection not connected yet';
 }
 function applyLeadContext(L){
   const workspace=inferWorkspace(L),source=inferSource(L);
@@ -98,7 +110,9 @@ async function openLead(id){
   activeLeadId=id; renderHub();
   const r=await apiFetch(API+'/api/leads/'+encodeURIComponent(id),{cache:'no-store'}),d=await r.json(); if(!r.ok)return;
   const L=d.lead||{};
-  activeReplyTo=L.replyTo||L.reply_to||L.replyRecipient||L.reply_recipient||'';
+  activeReplyTo=L.ffReplyTo||L.ff_reply_to||L.replyTo||L.reply_to||L.replyRecipient||L.reply_recipient||'';
+  activeDirectEmail=L.directEmail||L.direct_email||L.email||'';
+  activeReplyMode=L.replyMode||L.reply_mode||(activeReplyTo&&/@leads\.furnishedfinder\.com$/i.test(activeReplyTo)?'furnished_finder_conversation':(activeDirectEmail?'direct_email':'manual_furnished_finder'));
   setField('name',L.name||L.firstName||L.customerName||'');
   setField('email',L.email||''); setField('phone',L.phone||''); setField('venueContact',L.venueContact||'');
   setField('guestCount',L.guestCount||''); setField('guestAge',L.guestAge||''); setField('musicType',L.musicType||'');
@@ -112,7 +126,7 @@ async function openLead(id){
   setField('rentalEnd',toDateInput(L.rentalEnd||L.endDate||L.moveOut||L.move_out||L.requestedEnd||''));
   setField('rentalProperty',L.rentalProperty||L.property||L.listing||''); setField('occupants',L.occupants||L.occupantCount||'');
   setField('pets',L.pets||L.petInfo||''); setField('rentalBudget',L.rentalBudget||L.monthlyBudget||L.rateQuestion||'');
-  setField('rentalCall',L.rentalCall||L.wantsCall||'TBD'); setField('rentalReplyFocus',L.rentalReplyFocus||'Auto-detect'); setField('rentalQuestions',L.rentalQuestions||L.questions||'');
+  setField('rentalCall',L.rentalCall||L.wantsCall||'TBD'); setField('ffReplyTo',activeReplyTo); setField('directEmail',activeDirectEmail); setField('rentalReplyFocus',L.rentalReplyFocus||'Auto-detect'); setField('rentalQuestions',L.rentalQuestions||L.questions||'');
   setField('spinTopic',L.spinTopic||L.topic||'TBD'); setField('spinAIN',L.ain||L.AIN||''); setField('spinMintId',L.mintId||L.mint_id||'');
   setField('spinTier',L.tier||L.productTier||''); setField('spinQuestion',L.spinQuestion||L.question||'');
   availability=L.calendarStatus||'UNKNOWN'; setAvailability(availability); out.value=L.suggestedResponse||'';
@@ -231,7 +245,7 @@ const oldOpenLead=openLead;openLead=async function(id){await oldOpenLead(id);syn
 const oldBuildDocument=buildDocument;buildDocument=function(mode){oldBuildDocument(mode);const box=document.querySelector('#documentPreview'),a=proposalChoice('a'),b=proposalChoice('b'),choices='<h3>PROPOSAL CHOICES</h3><div class="quote-options">'+choiceHTML('OPTION A',a)+choiceHTML('OPTION B',b)+'</div>';box.innerHTML=choices+box.innerHTML}
 document.querySelector('#copyPackage').onclick=async()=>{
   const preview=document.querySelector('#documentPreview').innerText.trim(),answer=document.querySelector('#fastAnswer').value.trim(),email=document.querySelector('#customerEmail').value.trim();
-  const packageText=['REACHOUT ANSWER — COMPLETE CUSTOMER PACKAGE','','Workspace: '+selectedWorkspace(),'Source: '+selectedSource(),activeReplyTo?'Reply route: '+activeReplyTo:'','',answer,'',preview,'','DISTRIBUTION','Source outbound: connection dependent','Nick copy: studio@spinstream.xyz','Customer email: '+(email||'TBD')].filter(x=>x!==null&&x!==undefined).join('\n');
+  const packageText=['REACHOUT ANSWER — COMPLETE CUSTOMER PACKAGE','','Workspace: '+selectedWorkspace(),'Source: '+selectedSource(),activeReplyMode?'Reply mode: '+activeReplyMode:'',activeReplyTo?'Furnished Finder route: '+activeReplyTo:'',activeDirectEmail?'Direct traveler email: '+activeDirectEmail:'','',answer,'',preview,'','DISTRIBUTION','Source outbound: connection dependent','Nick copy: studio@spinstream.xyz','Customer email: '+(email||'TBD')].filter(x=>x!==null&&x!==undefined).join('\n');
   await navigator.clipboard.writeText(packageText); document.querySelector('#copyPackage').textContent='Complete Package Copied';
 }
 
