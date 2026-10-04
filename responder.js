@@ -214,6 +214,7 @@ function rentalMode(){const req=String(f.elements.request?.value||'').toLowerCas
 function spinMode(){const req=String(f.elements.request?.value||'').toLowerCase();return selectedWorkspace()==='SpinStream / NFArtifact'||req.includes('spinstream')}
 function toggleLeadMode(){
   const rental=rentalMode(),spin=spinMode(),lesson=!rental&&!spin&&lessonMode(),event=!rental&&!spin&&!lesson;
+  document.querySelector('#eventRequestFields')?.classList.toggle('hidden',rental||spin);
   document.querySelector('#rentalSheet')?.classList.toggle('hidden',!rental);
   document.querySelector('#spinSheet')?.classList.toggle('hidden',!spin);
   document.querySelector('#lessonSheet')?.classList.toggle('hidden',!lesson);
