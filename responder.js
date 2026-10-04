@@ -122,9 +122,9 @@ async function openLead(id){
   setField('date',toDateInput(L.eventDate||L.date||'')); setField('location',typeof L.location==='string'?L.location:(L.property||''));
   setField('start',toTimeInput(L.startTime||'')); setField('end',toTimeInput(L.endTime||'')); setSelect('musicians',L.musicians);
   setField('style',L.style||''); setField('message',L.message||L.customerMessage||'');
-  setField('rentalStart',toDateInput(L.rentalStart||L.startDate||L.moveIn||L.move_in||L.requestedStart||''));
-  setField('rentalEnd',toDateInput(L.rentalEnd||L.endDate||L.moveOut||L.move_out||L.requestedEnd||''));
-  setField('rentalProperty',L.rentalProperty||L.property||L.listing||''); setField('occupants',L.occupants||L.occupantCount||'');
+  setField('rentalStart',toDateInput(L.rentalStart||L.rental_start||L.startDate||L.moveIn||L.move_in||L.requestedStart||''));
+  setField('rentalEnd',toDateInput(L.rentalEnd||L.rental_end||L.endDate||L.moveOut||L.move_out||L.requestedEnd||''));
+  setField('rentalProperty',L.rentalProperty||L.rental_property||L.property||L.listing||''); setField('occupants',L.occupants||L.occupantCount||'');
   setField('pets',L.pets||L.petInfo||''); setField('rentalBudget',L.rentalBudget||L.monthlyBudget||L.rateQuestion||'');
   setField('rentalCall',L.rentalCall||L.wantsCall||'TBD'); setField('ffReplyTo',activeReplyTo); setField('directEmail',activeDirectEmail); setField('rentalReplyFocus',L.rentalReplyFocus||'Auto-detect'); setField('rentalQuestions',L.rentalQuestions||L.questions||'');
   setField('spinTopic',L.spinTopic||L.topic||'TBD'); setField('spinAIN',L.ain||L.AIN||''); setField('spinMintId',L.mintId||L.mint_id||'');
