@@ -37,4 +37,4 @@ Open an archived contact, add an email in the contact fields and choose **Save l
 
 Run `node --test tests/thumbtack-import.test.mjs`. To validate private exports locally, set `REACHOUT_CSV_DIR` to their local directory before running the tests. Private CSV data is never included in the repository.
 
-The five supplied exports yielded 703 rows, 637 unique export rows, 66 duplicate rows and 621 contact records in an isolated worker test. All 637 records were read back and checked, four simulated active leads were preserved, and all seven contract checks passed. This test verifies the prepared code; live import remains a separate operation.
+The five supplied exports yielded 703 rows, 637 unique export rows, 66 duplicate rows and 621 contact records in an isolated worker test. All 637 source rows were read back and checked, four simulated active leads were preserved, and all seven contract checks passed. This test verifies the prepared code; live import remains a separate operation.
