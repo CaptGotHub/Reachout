@@ -26,7 +26,7 @@
     const plan=csv.prepareImportPlan(records,existing);
     const known=plan.skipped.filter(item=>item.reason==='Already imported');
     $('importContacts').disabled=busy||!authenticated||(!plan.ready.length&&!known.length)||preflightNeeded;
-    $('importContacts').textContent=busy?'Importing…':plan.ready.length?'Archive '+plan.ready.length+' source rows':'Verify '+known.length+' imported rows';
+    $('importContacts').textContent=busy?'Importing…':plan.ready.length?'Archive '+plan.ready.length+' source rows':known.length?'Verify '+known.length+' imported rows':'Archive contacts';
     $('planSummary').textContent=records.length?(authenticated?plan.ready.length+' ready · '+plan.skipped.length+' already imported or repeated rows will be skipped.':records.length+' source rows previewed. Unlock the owner inbox to check the archive and import.'):'Choose CSV files to see the contacts.';
     return plan;
   }
