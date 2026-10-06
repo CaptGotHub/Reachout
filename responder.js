@@ -106,18 +106,24 @@ async function loadLeads(){const list=document.querySelector('#sourceLeadList');
   }).join('')||'<p class="muted">No leads in this queue yet.</p>';
   document.querySelectorAll('.lead-row[data-id]').forEach(b=>b.onclick=()=>openLead(b.dataset.id));
 }
+let loadedLeadId=null;
 async function openLead(id){
+  loadedLeadId=null;
   activeLeadId=id; renderHub();
   const r=await apiFetch(API+'/api/leads/'+encodeURIComponent(id),{cache:'no-store'}),d=await r.json(); if(!r.ok)return;
+  if(activeLeadId!==id)return;
   const L=d.lead||{};
+  f.reset();
+  document.querySelector('#documentPreview').classList.add('hidden');
   activeReplyTo=L.ffReplyTo||L.ff_reply_to||L.replyTo||L.reply_to||L.replyRecipient||L.reply_recipient||'';
   activeDirectEmail=L.directEmail||L.direct_email||L.email||'';
   activeReplyMode=L.replyMode||L.reply_mode||(activeReplyTo&&/@leads\.furnishedfinder\.com$/i.test(activeReplyTo)?'furnished_finder_conversation':(activeDirectEmail?'direct_email':'manual_furnished_finder'));
   setField('name',L.name||L.firstName||L.customerName||'');
   setField('email',L.email||''); setField('phone',L.phone||''); setField('venueContact',L.venueContact||'');
-  setField('guestCount',L.guestCount||''); setField('guestAge',L.guestAge||''); setField('musicType',L.musicType||'');
-  setField('budget',L.budget||''); setField('travelPreference',L.travelPreference||''); setField('thumbtackPrice',L.thumbtackPrice||'');
-  setField('leadCost',L.leadCost||''); setField('competition',L.competition||''); setField('included',L.included||'');
+  setField('guestCount',L.guestCount??''); setField('guestAge',L.guestAge||''); setField('musicType',L.musicType||'');
+  setField('budget',L.budget??''); setField('travelPreference',L.travelPreference||''); setField('thumbtackPrice',formatEstimate(L.estimate)||L.thumbtackPrice||'');
+  setField('leadCost',L.leadPrice??L.leadCost??''); setField('competition',L.competition||''); setField('included',L.included||'');
+  setField('eventType',L.eventType??''); setField('fee',L.fee??''); setField('deposit',L.deposit??''); setField('notes',L.notes??'');
   setSelect('request',L.requestType||L.request||'');
   setField('date',toDateInput(L.eventDate||L.date||'')); setField('location',typeof L.location==='string'?L.location:(L.property||''));
   setField('start',toTimeInput(L.startTime||'')); setField('end',toTimeInput(L.endTime||'')); setSelect('musicians',L.musicians);
@@ -132,8 +138,37 @@ async function openLead(id){
   availability=L.calendarStatus||'UNKNOWN'; setAvailability(availability); out.value=L.suggestedResponse||'';
   missingBox.innerHTML=(L.missing&&L.missing.length)?'<b>Still useful to ask:</b> '+L.missing.map(esc).join(' · '):'<b>Lead loaded. Review only what this customer actually needs.</b>';
   applyLeadContext(L);
+  loadedLeadId=id;
 }
-function setSelect(name,value){if(!value)return;const el=f.elements[name];for(const o of el.options){if(o.value.toLowerCase()===String(value).toLowerCase()){el.value=o.value;return}}}function toDateInput(x){if(!x)return'';const m=String(x).match(/\d{4}-\d{2}-\d{2}/);return m?m[0]:''}function toTimeInput(x){if(!x)return'';const m=String(x).match(/(\d{2}):(\d{2})/);return m?m[1]+':'+m[2]:''}function setAvailability(val){availability=val;document.querySelectorAll('[data-avail]').forEach(b=>b.classList.toggle('selected',normalizeAvail(b.dataset.avail)===normalizeAvail(val)));badge.textContent=val;badge.className='status '+String(val).toLowerCase().replaceAll(' ','-').replaceAll('/','-')}function normalizeAvail(x){return String(x).replaceAll(' / ','_').replaceAll(' ','_').toUpperCase()}
+function formatEstimate(estimate){
+  if(estimate===null||estimate===undefined)return '';
+  if(typeof estimate!=='object')return String(estimate);
+  const parts=[];
+  if(estimate.pricePerUnit!==null&&estimate.pricePerUnit!==undefined)parts.push(String(estimate.pricePerUnit)+(estimate.unitName?' / '+estimate.unitName:''));
+  if(estimate.total!==null&&estimate.total!==undefined)parts.push('Total: '+estimate.total);
+  return parts.join(' · ');
+}
+function setSelect(name,value){
+  const el=f.elements[name];
+  el.querySelectorAll('option[data-source-value]').forEach(o=>o.remove());
+  if(value===null||value===undefined||value===''){el.selectedIndex=0;return}
+  const text=String(value);
+  for(const o of el.options){if(o.value.toLowerCase()===text.toLowerCase()){el.value=o.value;return}}
+  const option=document.createElement('option');
+  option.value=text; option.textContent=text; option.dataset.sourceValue='true';
+  el.appendChild(option); el.value=text;
+}
+function toDateInput(x){if(!x)return'';const m=String(x).match(/\d{4}-\d{2}-\d{2}/);return m?m[0]:''}
+function toTimeInput(x){
+  if(!x)return '';
+  const m=String(x).trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$/i);
+  if(!m)return '';
+  let hour=Number(m[1]); const minute=Number(m[2]),period=m[3]?.toUpperCase();
+  if(minute>59||hour>(period?12:23)||(period&&hour<1))return '';
+  if(period)hour=hour%12+(period==='PM'?12:0);
+  return String(hour).padStart(2,'0')+':'+m[2];
+}
+function setAvailability(val){availability=val;document.querySelectorAll('[data-avail]').forEach(b=>b.classList.toggle('selected',normalizeAvail(b.dataset.avail)===normalizeAvail(val)));badge.textContent=val;badge.className='status '+String(val).toLowerCase().replaceAll(' ','-').replaceAll('/','-')}function normalizeAvail(x){return String(x).replaceAll(' / ','_').replaceAll(' ','_').toUpperCase()}
 function rentalLeadText(d){return [d.message,d.rentalQuestions,d.rentalBudget,d.rentalProperty].filter(Boolean).join(' ').toLowerCase()}
 function detectRentalReplyFocus(d){
   const explicit=String(d.rentalReplyFocus||'Auto-detect');
@@ -211,7 +246,26 @@ function buildRentalQuickAnswer(d){
   if(d.fee)s+=' The fee I am quoting is $'+d.fee+'.'; if(d.deposit)s+=' The deposit would be '+d.deposit+'.';
   s+='\n\nNick Laudani\n617-233-2008'; out.value=s;
 };
-document.querySelector('#copyFast').onclick=async()=>{await navigator.clipboard.writeText(out.value);document.querySelector('#copyFast').textContent='Copied'};document.querySelector('#markSent').onclick=async()=>{if(!activeLeadId){document.querySelector('#markSent').textContent='No lead selected';return}const r=await apiFetch(API+'/api/leads/'+encodeURIComponent(activeLeadId),{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({status:'WAITING',calendarStatus:normalizeAvail(availability),eventDate:f.elements.date.value,startTime:f.elements.start.value,endTime:f.elements.end.value,location:f.elements.location.value,musicians:f.elements.musicians.value,style:f.elements.style.value,message:f.elements.message.value,fee:f.elements.fee.value||null,deposit:f.elements.deposit.value||null})});document.querySelector('#markSent').textContent=r.ok?'Marked waiting':'Update failed';if(r.ok)loadLeads()};document.querySelectorAll('[data-hub]').forEach(b=>b.onclick=()=>{activeHub=b.dataset.hub;document.querySelectorAll('[data-hub]').forEach(x=>x.classList.remove('active'));b.classList.add('active');renderHub()});document.querySelector('#unlockInbox')?.addEventListener('click',unlockInbox);document.querySelector('#lockInbox')?.addEventListener('click',lockInbox);loadLeads();setInterval(()=>{if(adminToken())loadLeads()},5000);window.addEventListener('focus',()=>{if(adminToken())loadLeads()});
+function leadChanges(){
+  const d=v();
+  return {calendarStatus:normalizeAvail(availability),eventDate:d.date,startTime:d.start,endTime:d.end,location:d.location,musicians:d.musicians,style:d.style,message:d.message,budget:d.budget,guestCount:d.guestCount,eventType:d.eventType,fee:d.fee||null,deposit:d.deposit||null,notes:d.notes};
+}
+async function saveLead(markWaiting=false){
+  const button=document.querySelector(markWaiting?'#markSent':'#saveLead');
+  if(!activeLeadId){button.textContent='No lead selected';return}
+  if(loadedLeadId!==activeLeadId){button.textContent='Load lead before saving';return}
+  const changes=leadChanges(); if(markWaiting)changes.status='WAITING';
+  try{
+    const r=await apiFetch(API+'/api/leads/'+encodeURIComponent(activeLeadId),{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(changes)});
+    button.textContent=r.ok?(markWaiting?'Marked waiting':'Lead saved'):'Update failed';
+    if(r.ok)await loadLeads();
+  }catch{button.textContent='Update failed'}
+}
+document.querySelector('#copyFast').onclick=async()=>{await navigator.clipboard.writeText(out.value);document.querySelector('#copyFast').textContent='Copied'};
+document.querySelector('#markSent').onclick=()=>saveLead(true);
+document.querySelector('#saveLead').onclick=()=>saveLead();
+['thumbtackPrice','leadCost'].forEach(name=>{f.elements[name].readOnly=true});
+document.querySelectorAll('[data-hub]').forEach(b=>b.onclick=()=>{activeHub=b.dataset.hub;document.querySelectorAll('[data-hub]').forEach(x=>x.classList.remove('active'));b.classList.add('active');renderHub()});document.querySelector('#unlockInbox')?.addEventListener('click',unlockInbox);document.querySelector('#lockInbox')?.addEventListener('click',lockInbox);loadLeads();setInterval(()=>{if(adminToken())loadLeads()},5000);window.addEventListener('focus',()=>{if(adminToken())loadLeads()});
 let setupCount=0;
 function addSetup(){
  setupCount++;
