@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Import Thumbtack Contacts | ReachOut Answer</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .import-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.import-panel{padding:24px}.import-panel label{display:block;margin:12px 0}.import-panel textarea,.import-panel input{max-width:100%}.import-actions{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0}.import-stats{display:flex;gap:22px;flex-wrap:wrap;margin:22px 0}.import-stats b{display:block;font-size:28px}.table-wrap{max-height:480px;overflow:auto}table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:12px;border-bottom:1px solid #d8dce4;white-space:nowrap}th{position:sticky;top:0;background:#fff;color:#142130}.import-panel button:disabled{opacity:.55;cursor:default}.import-result{white-space:pre-line}.progress-box{padding:16px;border:1px solid #d8dce4;border-radius:12px;margin-bottom:16px}@media(max-width:760px){.import-grid{grid-template-columns:1fr}.import-panel{padding:18px}}
+  </style>
+</head>
+<body>
+<header><div class="wrap nav"><a class="brand" href="index.html">ReachOut <b>Answer</b></a><nav><a href="responder">Owner inbox</a></nav></div></header>
+<main class="wrap section">
+  <p class="kicker">PRIVATE WORKSPACE · THUMBTACK CONTACTS</p>
+  <h1>Build your contact archive.</h1>
+  <p>Use your Thumbtack contacts export to practice and keep track of past inquiries.</p>
+  <div class="import-grid">
+    <section class="panel import-panel">
+      <h2>1. Choose your contacts</h2>
+      <label for="csvFile">Thumbtack contacts CSV files<input id="csvFile" type="file" accept=".csv,text/csv" multiple></label>
+      <details id="pasteDetails"><summary>Or paste the CSV</summary><label for="csvText">CSV contents<textarea id="csvText" rows="7" spellcheck="false" placeholder="Paste the header and contact rows here"></textarea></label></details>
+      <div class="import-actions"><button class="btn" type="button" id="previewCsv">Preview contacts</button></div>
+      <p class="muted">The preview stays in this tab until you choose Import. Contact dates remain separate from event dates. Empty emails stay empty.</p>
+      <p id="csvError" class="api-error" role="alert"></p>
+    </section>
+    <section class="panel import-panel">
+      <h2>2. Store and check</h2>
+      <p id="accessStatus" role="status">Checking owner access…</p>
+      <div class="import-actions"><a class="btn" id="openOwnerInbox" href="responder" target="_blank" rel="noopener">Open inbox to unlock</a><button class="btn" id="checkAccess" type="button">Check access again</button></div>
+      <p>Overlapping rows are skipped. Repeat inquiries stay in the contact's history. Your active leads stay in the inbox; earlier contacts go into Archive. Every imported row is read back and checked. This import sends no customer messages.</p>
+      <button class="btn primary" id="importContacts" type="button" disabled>Import contacts</button>
+      <p id="importResult" class="import-result" role="status" aria-live="polite"></p>
+      <a id="viewInbox" class="btn" href="responder" hidden>View contacts in the inbox</a>
+    </section>
+  </div>
+  <section class="panel import-panel" style="margin-top:20px">
+    <h2>Your contacts</h2>
+    <div class="import-stats"><span><b id="contactCount">0</b>contacts</span><span><b id="inquiryCount">0</b>distinct inquiries</span><span><b id="phoneCount">0</b>with phone</span><span><b id="emailCount">0</b>with email</span><span><b id="dateRange">—</b>contact dates</span></div>
+    <p class="muted" id="planSummary">Choose a CSV to see the contacts.</p>
+    <div class="table-wrap"><table><thead><tr><th>Customer</th><th>Phone</th><th>Email</th><th>Contacted</th><th>Category</th><th>Location</th><th>Job status</th></tr></thead><tbody id="contactsBody"></tbody></table></div>
+  </section>
+</main>
+<script src="thumbtack-import.js?v=20261006-contacts1"></script>
+<script src="thumbtack-import-ui.js?v=20261006-contacts1"></script>
+</body>
+</html>

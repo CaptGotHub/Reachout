@@ -1,7 +1,7 @@
 /**
  * ReachOut Answer
  * Worker: reachout-respond
- * Version: RA-20261006-03
+ * Version: RA-20261006-04-contacts
  */
 
 export default {
@@ -9,13 +9,19 @@ export default {
     const url = new URL(request.url);
     try {
       if (request.method === "GET" && url.pathname === "/") {
-        return json({ ok: true, service: "ReachOut Answer", version: "RA-20261006-03", status: "online" });
+        return json({ ok: true, service: "ReachOut Answer", version: "RA-20261006-04-contacts", status: "online" });
       }
       if (request.method === "GET" && url.pathname === "/health") {
-        return json({ ok: true, service: "ReachOut Answer", version: "RA-20261006-03", status: "ready", kvConnected: !!env.REACHOUT_LEADS, webhook: "/webhooks/thumbtack", leads: "/api/leads" });
+        return json({ ok: true, service: "ReachOut Answer", version: "RA-20261006-04-contacts", status: "ready", kvConnected: !!env.REACHOUT_LEADS, webhook: "/webhooks/thumbtack", leads: "/api/leads", csvImport: "/api/admin/import-thumbtack", csvBatchSize: 10 });
       }
       if (request.method === "POST" && url.pathname === "/webhooks/thumbtack") {
         return await receiveThumbtack(request, env);
+      }
+      if (url.pathname === "/api/admin/import-thumbtack") {
+        if (request.method === "OPTIONS") { return new Response(null, { status: 204, headers: apiCors() }); }
+        if (!checkAuth(request, env)) { return apiJson({ ok: false, error: "unauthorized" }, 401); }
+        if (request.method !== "POST") { return apiJson({ ok: false, error: "method_not_allowed" }, 405); }
+        return await importThumbtackContacts(request, env);
       }
       if (url.pathname === "/api/admin/reindex") {
         if (request.method === "OPTIONS") { return new Response(null, { status: 204, headers: apiCors() }); }
@@ -40,7 +46,7 @@ export default {
         const isLeadsItem = match && (request.method === "GET" || request.method === "PATCH");
         if (isLeadsList || isLeadsItem) {
           if (!checkAuth(request, env)) { return apiJson({ ok: false, error: "unauthorized" }, 401); }
-          if (isLeadsList) { return await listLeads(env); }
+          if (isLeadsList) { return await listLeads(env, url); }
           const id = decodeURIComponent(match[1]);
           if (request.method === "GET") { return await getLead(id, env); }
           if (request.method === "PATCH") { return await patchLead(id, request, env); }
@@ -117,10 +123,27 @@ async function receiveThumbtack(request, env) {
   return json({ ok: true, received: true, stored: true, leadId });
 }
 
-async function listLeads(env) {
-  const index = await readJSON(env.REACHOUT_LEADS, "index:leads") || [];
+async function listLeads(env, url) {
+  if (url?.searchParams.has("ids")) {
+    const ids = [...new Set(url.searchParams.get("ids").split(",").filter(Boolean))];
+    if (!ids.length || ids.length > 10 || ids.some(id => !/^[a-zA-Z0-9_-]{1,160}$/.test(id))) {
+      return apiJson({ ok: false, error: "invalid_lead_ids" }, 400);
+    }
+    const found = await Promise.all(ids.map(id => readJSON(env.REACHOUT_LEADS, "lead:" + id)));
+    const leads = found.filter(Boolean);
+    return apiJson({ ok: true, count: leads.length, leads, missingIds: ids.filter((id, i) => !found[i]) });
+  }
+  if (url?.searchParams.get("archived") === "0") {
+    const active = (await readJSON(env.REACHOUT_LEADS, "index:leads") || []).filter(lead => !lead.archived);
+    const archiveCount = Number(await env.REACHOUT_LEADS.get("count:archive") || 0);
+    active.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+    return apiJson({ ok: true, count: active.length, activeCount: active.length, archiveCount, leads: active });
+  }
+  const index = await readLeadIndex(env);
   index.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
-  return apiJson({ ok: true, count: index.length, leads: index });
+  const archiveCount = index.filter(lead => lead.archived === true).length;
+  const leads = url?.searchParams.has("archived") ? index.filter(lead => (lead.archived === true) === (url.searchParams.get("archived") === "1")) : index;
+  return apiJson({ ok: true, count: leads.length, activeCount: index.length - archiveCount, archiveCount, leads });
 }
 
 async function getLead(id, env) {
@@ -134,7 +157,12 @@ async function patchLead(id, request, env) {
   if (!lead) return apiJson({ ok: false, error: "lead_not_found" }, 404);
   let changes;
   try { changes = await request.json(); } catch { return apiJson({ ok: false, error: "invalid_json" }, 400); }
-  const allowed = ["status","calendarStatus","eventDate","startTime","endTime","location","musicians","style","message","budget","guestCount","eventType","fee","deposit","notes"];
+  const allowed = ["status","calendarStatus","eventDate","startTime","endTime","location","musicians","style","message","budget","guestCount","eventType","fee","deposit","notes","name","email","phone","requestType","archived"];
+  if (!changes || typeof changes !== "object" || Array.isArray(changes)) return apiJson({ ok: false, error: "invalid_changes" }, 400);
+  if ("archived" in changes && typeof changes.archived !== "boolean") return apiJson({ ok: false, error: "invalid_archive_state" }, 400);
+  for (const field of ["name","email","phone","requestType"]) {
+    if (field in changes && changes[field] !== null && (typeof changes[field] !== "string" || changes[field].length > 500)) return apiJson({ ok: false, error: "invalid_contact_field" }, 400);
+  }
   for (const field of allowed) { if (field in changes) { lead[field] = changes[field]; } }
   lead.updatedAt = new Date().toISOString();
   lead.missing = missingFields(lead);
@@ -144,9 +172,8 @@ async function patchLead(id, request, env) {
   return apiJson({ ok: true, lead });
 }
 
-async function updateIndex(env, lead) {
-  let index = await readJSON(env.REACHOUT_LEADS, "index:leads") || [];
-  const summary = {
+function leadSummary(lead) {
+  return {
     id: lead.id, source: lead.source, workspace: lead.workspace, status: lead.status,
     name: lead.name || lead.firstName || "New Thumbtack Lead",
     phone: lead.phone || null, email: lead.email || null,
@@ -154,13 +181,143 @@ async function updateIndex(env, lead) {
     location: lead.location, calendarStatus: lead.calendarStatus, eventCount: lead.eventCount, updatedAt: lead.updatedAt,
     musicians: lead.musicians || null, style: lead.style || null, budget: lead.budget || null,
     guestCount: lead.guestCount || null, eventType: lead.eventType || null,
-    leadPrice: lead.leadPrice || null, estimate: lead.estimate || null,
-    message: lead.message || null, missing: lead.missing || [], suggestedResponse: lead.suggestedResponse || null
+    leadPrice: lead.leadPrice ?? null, estimate: lead.estimate || null,
+    message: lead.message || null, missing: lead.missing || [], suggestedResponse: lead.suggestedResponse || null,
+    recordType: lead.recordType || null, contactDate: lead.contactDate || null, archived: lead.archived === true,
+    contactHistoryCount: (lead.contactHistory || []).length,
+    contactImportKeys: (lead.contactHistory || []).map(entry => entry.key)
   };
+}
+
+async function updateIndex(env, lead) {
+  const key = lead.archived ? "index:archive" : "index:leads";
+  let index = await readJSON(env.REACHOUT_LEADS, key) || [];
+  const summary = leadSummary(lead);
   const position = index.findIndex(item => item.id === lead.id);
   if (position >= 0) { index[position] = summary; } else { index.unshift(summary); }
-  index = index.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))).slice(0, 500);
-  await env.REACHOUT_LEADS.put("index:leads", JSON.stringify(index));
+  index = index.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  await env.REACHOUT_LEADS.put(key, JSON.stringify(index));
+  if (lead.archived) await env.REACHOUT_LEADS.put("count:archive", String(index.length));
+  const otherKey = lead.archived ? "index:leads" : "index:archive";
+  const other = await readJSON(env.REACHOUT_LEADS, otherKey) || [];
+  const remaining = other.filter(item => item.id !== lead.id);
+  if (remaining.length !== other.length) {
+    await env.REACHOUT_LEADS.put(otherKey, JSON.stringify(remaining));
+    if (!lead.archived) await env.REACHOUT_LEADS.put("count:archive", String(remaining.length));
+  }
+}
+
+async function readLeadIndex(env) {
+  const [active, archive] = await Promise.all([readJSON(env.REACHOUT_LEADS, "index:leads"), readJSON(env.REACHOUT_LEADS, "index:archive")]);
+  return [...new Map([...(active || []), ...(archive || [])].map(lead => [lead.id, lead])).values()];
+}
+
+function contactPhoneKey(value) {
+  let digits = String(value || "").replace(/\D/g, "");
+  if (digits.length === 11 && digits[0] === "1") digits = digits.slice(1);
+  return digits;
+}
+
+function contactNameKey(value) {
+  return String(value || "").normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function contactIdentity(value) {
+  if (!contactPhoneKey(value.phone)) return JSON.stringify([contactNameKey(value.name), "", value.contactDate, contactNameKey(value.category || value.requestType), contactNameKey(value.raw?.["Business Name"] || value.businessName)]);
+  return JSON.stringify([contactNameKey(value.name), contactPhoneKey(value.phone)]);
+}
+
+function normalizeContactRow(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("invalid_csv_row");
+  if (Object.keys(raw).length > 40 || Object.values(raw).some(value => typeof value !== "string" || value.length > 4000)) throw new Error("invalid_csv_values");
+  const value = key => String(raw[key] || "").trim();
+  const name = value("Customer Name"), phone = value("Phone Number"), contactDate = value("Date of Contact"), category = value("Category");
+  if (!name || !category || (phone && contactPhoneKey(phone).length < 7)) throw new Error("missing_contact_fields");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(contactDate) || Number.isNaN(Date.parse(contactDate + "T12:00:00Z")) || new Date(contactDate + "T12:00:00Z").toISOString().slice(0, 10) !== contactDate) throw new Error("invalid_contact_date");
+  const money = key => {
+    const text = value(key).replace(/[$,]/g, "");
+    if (!text) return null;
+    if (!/^-?\d+(\.\d{1,2})?$/.test(text)) throw new Error("invalid_contact_cost");
+    return Number(text);
+  };
+  const row = { name, phone, contactDate, category, email: value("Email") || value("Email Address") || value("Customer Email") || null,
+    location: [value("Zip Code"), value("State")].filter(Boolean).join(", "),
+    leadPrice: money("Lead Cost"), netCost: money("Net Cost"), salesTax: money("Sales Tax"), raw: { ...raw } };
+  row.key = JSON.stringify([contactNameKey(name), contactPhoneKey(phone), contactDate, contactNameKey(category), contactNameKey(value("Business Name")), Object.entries(raw).sort(([a], [b]) => a.localeCompare(b))]);
+  return row;
+}
+
+async function importThumbtackContacts(request, env) {
+  if (!env.REACHOUT_LEADS) return apiJson({ ok: false, error: "REACHOUT_LEADS_not_bound" }, 500);
+  let body, rows;
+  try {
+    body = await request.json();
+    if (!Array.isArray(body?.rows) || !body.rows.length || body.rows.length > 10) return apiJson({ ok: false, error: "send_1_to_10_csv_rows" }, 400);
+    rows = body.rows.map(normalizeContactRow);
+  } catch (error) { return apiJson({ ok: false, error: String(error.message || "invalid_json") }, 400); }
+  const index = await readLeadIndex(env);
+  const now = new Date().toISOString(), touched = new Map(), receipts = [];
+  let created = 0, updated = 0, skipped = 0;
+  for (const row of rows) {
+    const identity = contactIdentity(row);
+    let lead = touched.get(identity);
+    if (!lead) {
+      const match = index.find(item => String(item.source || "").toUpperCase() === "THUMBTACK" && (contactIdentity(item) === identity || (item.contactImportKeys || []).some(key => {
+        try { return JSON.stringify(JSON.parse(key).slice(0, 2)) === identity; } catch { return false; }
+      })));
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(identity));
+      const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+      const id = match?.id || "thumbtack-import-" + hash.slice(0, 32);
+      lead = await readJSON(env.REACHOUT_LEADS, "lead:" + id);
+      if (!lead) {
+        lead = { id, source: "THUMBTACK", workspace: "LIVE MUSIC", status: "ARCHIVED", archived: true, recordType: "THUMBTACK_CONTACT_IMPORT", name: row.name, phone: row.phone, email: row.email,
+          firstName: firstWord(row.name), eventDate: null, startTime: null, endTime: null, message: null, calendarStatus: "UNKNOWN", eventCount: 0, eventIds: [], createdAt: now };
+        created++;
+      }
+      lead.contactHistory = Array.isArray(lead.contactHistory) ? lead.contactHistory : [];
+      touched.set(identity, lead);
+    }
+    const previous = lead.contactHistory.find(entry => entry.key === row.key);
+    if (previous && JSON.stringify(previous.raw) === JSON.stringify(row.raw)) {
+      skipped++;receipts.push({ key: row.key, leadId: lead.id, outcome: "skipped" });continue;
+    }
+    if (previous) {
+      previous.raw = row.raw; previous.updatedAt = now;
+    } else {
+      lead.contactHistory.push({ key: row.key, contactDate: row.contactDate, category: row.category, raw: row.raw, importedAt: now });
+    }
+    lead.contactHistory.sort((a, b) => b.contactDate.localeCompare(a.contactDate));
+    if (lead.recordType === "THUMBTACK_CONTACT_IMPORT") {
+      const latest = normalizeContactRow(lead.contactHistory[0].raw);
+      lead.contactDate = latest.contactDate; lead.requestType = latest.category; lead.location = latest.location;
+      lead.leadPrice = latest.leadPrice; lead.netCost = latest.netCost; lead.salesTax = latest.salesTax;
+      lead.businessName = latest.raw["Business Name"] || null;
+      lead.sourceJobStatus = latest.raw["Job Status"] || null;
+      if (!lead.email && latest.email) lead.email = latest.email;
+    }
+    lead.updatedAt = now;
+    lead.missing = missingFields(lead); lead.suggestedResponse = makeResponse(lead);
+    updated++;receipts.push({ key: row.key, leadId: lead.id, outcome: previous ? "updated" : "stored" });
+  }
+  // One index read/write per batch avoids competing index writes within the import.
+  for (const lead of touched.values()) {
+    await env.REACHOUT_LEADS.put("lead:" + lead.id, JSON.stringify(lead));
+    const position = index.findIndex(item => item.id === lead.id), summary = leadSummary(lead);
+    if (position >= 0) index[position] = summary; else index.push(summary);
+  }
+  index.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  await env.REACHOUT_LEADS.put("index:archive", JSON.stringify(index.filter(lead => lead.archived)));
+  await env.REACHOUT_LEADS.put("count:archive", String(index.filter(lead => lead.archived).length));
+  const activeUpdates = [...touched.values()].filter(lead => !lead.archived);
+  if (activeUpdates.length) {
+    const activeIndex = (await readJSON(env.REACHOUT_LEADS, "index:leads") || []).filter(lead => !lead.archived);
+    for (const lead of activeUpdates) {
+      const position = activeIndex.findIndex(item => item.id === lead.id);
+      if (position >= 0) activeIndex[position] = leadSummary(lead); else activeIndex.push(leadSummary(lead));
+    }
+    await env.REACHOUT_LEADS.put("index:leads", JSON.stringify(activeIndex));
+  }
+  return apiJson({ ok: true, processed: rows.length, created, updated, skipped, receipts, leads: [...touched.values()].map(leadSummary) });
 }
 
 async function reindexLeads(env) {
@@ -199,7 +356,7 @@ async function reindexLeads(env) {
   }
   const merged = {};
   for (const { key, lead } of allLeads) {
-    const mergeKey = safeId(String(lead.name || lead.firstName || "").toLowerCase());
+    const mergeKey = lead.recordType === "THUMBTACK_CONTACT_IMPORT" ? "import:" + lead.id : safeId(String(lead.name || lead.firstName || "").toLowerCase());
     if (!merged[mergeKey]) {
       merged[mergeKey] = { ...lead, _originalKeys: [key] };
     } else {
@@ -220,7 +377,7 @@ async function reindexLeads(env) {
   const index = [];
   let mergedCount = 0;
   for (const [mergeKey, lead] of Object.entries(merged)) {
-    const newId = "thumbtack-" + mergeKey;
+    const newId = lead.recordType === "THUMBTACK_CONTACT_IMPORT" ? lead.id : "thumbtack-" + mergeKey;
     lead.id = newId;
     lead.missing = missingFields(lead);
     lead.suggestedResponse = makeResponse(lead);
@@ -232,20 +389,12 @@ async function reindexLeads(env) {
         await env.REACHOUT_LEADS.delete(oldKey);
       }
     }
-    index.push({
-      id: lead.id, source: lead.source, workspace: lead.workspace, status: lead.status,
-      name: lead.name || lead.firstName || "New Thumbtack Lead",
-      phone: lead.phone || null, email: lead.email || null,
-      requestType: lead.requestType, eventDate: lead.eventDate, startTime: lead.startTime, endTime: lead.endTime,
-      location: lead.location, calendarStatus: lead.calendarStatus, eventCount: lead.eventCount, updatedAt: lead.updatedAt,
-      musicians: lead.musicians || null, style: lead.style || null, budget: lead.budget || null,
-      guestCount: lead.guestCount || null, eventType: lead.eventType || null,
-      leadPrice: lead.leadPrice || null, estimate: lead.estimate || null,
-      message: lead.message || null, missing: lead.missing || [], suggestedResponse: lead.suggestedResponse || null
-    });
+    index.push(leadSummary(lead));
   }
   index.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
-  await env.REACHOUT_LEADS.put("index:leads", JSON.stringify(index));
+  await env.REACHOUT_LEADS.put("index:leads", JSON.stringify(index.filter(lead => !lead.archived)));
+  await env.REACHOUT_LEADS.put("index:archive", JSON.stringify(index.filter(lead => lead.archived)));
+  await env.REACHOUT_LEADS.put("count:archive", String(index.filter(lead => lead.archived).length));
   return apiJson({ ok: true, reindexed: mergedCount, count: index.length, leads: index });
 }
 
@@ -333,6 +482,7 @@ function missingFields(lead) {
 }
 
 function makeResponse(lead) {
+  if (lead.recordType === "THUMBTACK_CONTACT_IMPORT") return "";
   const firstName = lead.firstName || firstWord(lead.name) || "there";
   let text = "Hi " + firstName + " — thanks for reaching out";
   if (lead.requestType) { text += " about " + String(lead.requestType).toLowerCase(); }

@@ -1,0 +1,7 @@
+dialog{border:0;border-radius:18px;padding:28px;max-width:480px;width:calc(100% - 40px);box-shadow:0 20px 70px #0005}
+dialog::backdrop{background:#101b2bcc}dialog label{display:block}dialog input{width:100%;margin-top:10px}
+.queue-tabs{align-items:center}.queue-tabs [data-queue] span{margin-left:6px;opacity:.75}
+.archive-toolbar{padding:18px;margin:18px 0}.archive-toolbar p{margin-top:0}
+.history-table{max-width:100%;max-height:280px;overflow:auto;margin:16px 0}
+.history-table table{width:100%;border-collapse:collapse;font-size:13px}.history-table th,.history-table td{text-align:left;padding:9px;border-bottom:1px solid #d8dce4}
+[hidden]{display:none!important}

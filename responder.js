@@ -17,22 +17,22 @@ function apiHeaders(extra={}){const t=adminToken();return {...extra,...(t?{Autho
 async function apiFetch(url,opts={}){
   opts={...opts,headers:apiHeaders(opts.headers||{})};
   return fetch(url,opts);
-}const f=document.querySelector('#fastLead'),out=document.querySelector('#fastAnswer'),badge=document.querySelector('#availBadge'),missingBox=document.querySelector('#missing');let availability='UNKNOWN',activeHub='ALL',allLeads=[],activeLeadId=null,activeReplyTo='',activeDirectEmail='',activeReplyMode='';
+}const f=document.querySelector('#fastLead'),out=document.querySelector('#fastAnswer'),badge=document.querySelector('#availBadge'),missingBox=document.querySelector('#missing');let availability='UNKNOWN',activeHub='ALL',activeQueue='ACTIVE',backendSupportsArchive=false,workerContractChecked=false,activeArchivedContact=false,allLeads=[],activeLeadId=null,activeReplyTo='',activeDirectEmail='',activeReplyMode='';
 function setAuthButtons(unlocked){
   const unlock=document.querySelector('#unlockInbox'),lock=document.querySelector('#lockInbox');
   if(unlock) unlock.hidden=unlocked;
   if(lock) lock.hidden=!unlocked;
 }
-async function unlockInbox(){
-  const entered=window.prompt('ReachOut private access token — paste only the raw REACHOUT_ADMIN_TOKEN value.');
-  if(!entered) return;
-  localStorage.setItem(TOKEN_KEY,entered.trim());
-  localStorage.setItem(TOKEN_EXPIRY_KEY,String(Date.now()+TRUST_MS));
-  await loadLeads();
-}
+async function unlockInbox(){document.querySelector('#ownerAccessDialog').showModal();}
+document.querySelector('#ownerAccessForm').addEventListener('submit',async event=>{
+  event.preventDefault();const input=document.querySelector('#ownerAccessToken'),entered=input.value.trim();if(!entered)return;
+  localStorage.setItem(TOKEN_KEY,entered);localStorage.setItem(TOKEN_EXPIRY_KEY,String(Date.now()+TRUST_MS));
+  document.querySelector('#ownerAccessForm').reset();document.querySelector('#ownerAccessDialog').close();await loadLeads();
+});
+document.querySelector('#cancelOwnerAccess').onclick=()=>{document.querySelector('#ownerAccessForm').reset();document.querySelector('#ownerAccessDialog').close();};
 function lockInbox(){
   localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(TOKEN_EXPIRY_KEY);
-  allLeads=[]; activeLeadId=null;
+  allLeads=[]; activeLeadId=null; loadedLeadId=null; activeArchivedContact=false; f.reset();out.value='';document.querySelector('#contactHistoryPanel').hidden=true;document.querySelector('#documentPreview').classList.add('hidden');
   setAuthButtons(false);
   setSecurityStatus('LEAD API PROTECTED · Private inbox locked.');
   const list=document.querySelector('#sourceLeadList');
@@ -96,14 +96,15 @@ function applyLeadContext(L){
   if(s&&[...s.options].some(o=>o.value===source))s.value=source;
   syncContextLabels(); toggleLeadMode();
 }
-async function loadLeads(){const list=document.querySelector('#sourceLeadList');if(!adminToken()){setAuthButtons(false);setSecurityStatus('LEAD API PROTECTED · Private inbox locked.');list.innerHTML='<p class="muted">Inbox locked. Click Unlock inbox to enter your private token.</p>';return;}setSecurityStatus('LEAD API PROTECTED · Checking private access…');list.innerHTML='<p class="muted">Loading live leads…</p>';try{const r=await apiFetch(API+'/api/leads',{cache:'no-store'}),d=await r.json();if(!r.ok){if(r.status===401){sessionStorage.removeItem(TOKEN_KEY);setAuthButtons(false);setSecurityStatus('PRIVATE INBOX LOCKED · Token not accepted.');}throw new Error(r.status===401?'Unauthorized — click Unlock inbox and enter the current raw admin token.':(d.error||'API error'))}allLeads=d.leads||[];setAuthButtons(true);setSecurityStatus('PRIVATE INBOX CONNECTED · Lead API authenticated.');renderHub()}catch(e){list.innerHTML='<p class="api-error">Could not load ReachOut inbox: '+esc(e.message)+'</p>'}}function renderHub(){
-  const rows=allLeads.filter(x=>leadMatchesHub(x,activeHub));
-  document.querySelector('#hubTitle').textContent=activeHub==='ALL'?'All Leads':activeHub;
+async function loadLeads(){const list=document.querySelector('#sourceLeadList');if(!adminToken()){setAuthButtons(false);setSecurityStatus('LEAD API PROTECTED · Private inbox locked.');list.innerHTML='<p class="muted">Inbox locked. Click Unlock inbox to enter your private token.</p>';return;}setSecurityStatus('LEAD API PROTECTED · Checking private access…');list.innerHTML='<p class="muted">Loading live leads…</p>';const requestedQueue=activeQueue;try{if(!workerContractChecked){const health=await apiFetch(API+'/health',{cache:'no-store'}),contract=await health.json();backendSupportsArchive=contract.csvImport==='/api/admin/import-thumbtack';workerContractChecked=true;}const r=await apiFetch(API+'/api/leads'+(backendSupportsArchive?'?archived='+(activeQueue==='ARCHIVE'?'1':'0'):''),{cache:'no-store'}),d=await r.json();if(requestedQueue!==activeQueue||!adminToken())return;if(!r.ok){if(r.status===401){localStorage.removeItem(TOKEN_KEY);localStorage.removeItem(TOKEN_EXPIRY_KEY);sessionStorage.removeItem(TOKEN_KEY);allLeads=[];setAuthButtons(false);setSecurityStatus('PRIVATE INBOX LOCKED · Token not accepted.');}throw new Error(r.status===401?'Unauthorized — click Unlock inbox and enter the current raw admin token.':(d.error||'API error'))}allLeads=d.leads||[];document.querySelector('#activeQueueCount').textContent=d.activeCount??allLeads.filter(x=>!x.archived).length;document.querySelector('#archiveQueueCount').textContent=d.archiveCount??allLeads.filter(x=>x.archived).length;setAuthButtons(true);setSecurityStatus('PRIVATE INBOX CONNECTED · Lead API authenticated.');renderHub()}catch(e){list.innerHTML='<p class="api-error">Could not load ReachOut inbox: '+esc(e.message)+'</p>'}}function renderHub(){
+  const rows=allLeads.filter(x=>(x.archived===true)===(activeQueue==='ARCHIVE')&&leadMatchesHub(x,activeHub));
+  const archived=allLeads.filter(x=>x.archived);const withEmail=archived.filter(x=>x.email).length;document.querySelector('#archiveToolbar').hidden=activeQueue!=='ARCHIVE';document.querySelector('#archiveCoverage').textContent=backendSupportsArchive?archived.length+' archived contacts · '+withEmail+' with email. Save an email on any contact to make it available here.':'The archive worker update is needed before contacts can be imported.';
+  document.querySelector('#hubTitle').textContent=(activeQueue==='ARCHIVE'?'Archive':'Active inbox')+(activeHub==='ALL'?'':' · '+activeHub);
   document.querySelector('#leadCount').textContent=rows.length;
   document.querySelector('#sourceLeadList').innerHTML=rows.map(x=>{
     const src=inferSource(x),workspace=inferWorkspace(x);
-    return '<button class="lead-row '+(x.id===activeLeadId?'selected':'')+'" data-id="'+esc(x.id)+'"><span class="lead-source">'+esc(src)+' · '+esc(workspace)+'</span><b>'+esc(x.name||'New lead')+'</b><small>'+esc([x.requestType,niceDate(x.eventDate||x.rentalStart||x.startDate),x.location||x.property].filter(Boolean).join(' · '))+'</small><em>'+esc(x.status||'NEW')+' · '+esc(x.calendarStatus||'UNKNOWN')+'</em></button>';
-  }).join('')||'<p class="muted">No leads in this queue yet.</p>';
+    return '<button class="lead-row '+(x.id===activeLeadId?'selected':'')+'" data-id="'+esc(x.id)+'"><span class="lead-source">'+esc(src)+' · '+esc(workspace)+'</span><b>'+esc(x.name||'New lead')+'</b><small>'+esc([x.requestType,niceDate(x.archived?x.contactDate:(x.eventDate||x.rentalStart||x.startDate)),x.location||x.property].filter(Boolean).join(' · '))+'</small><em>'+esc(x.status||'NEW')+' · '+esc(x.archived?(x.contactHistoryCount||1)+' source records':(x.calendarStatus||'UNKNOWN'))+'</em></button>';
+  }).join('')||'<p class="muted">No contacts in this queue yet.</p>';
   document.querySelectorAll('.lead-row[data-id]').forEach(b=>b.onclick=()=>openLead(b.dataset.id));
 }
 let loadedLeadId=null;
@@ -113,6 +114,7 @@ async function openLead(id){
   const r=await apiFetch(API+'/api/leads/'+encodeURIComponent(id),{cache:'no-store'}),d=await r.json(); if(!r.ok)return;
   if(activeLeadId!==id)return;
   const L=d.lead||{};
+  activeArchivedContact=L.archived===true;
   f.reset();
   document.querySelector('#documentPreview').classList.add('hidden');
   activeReplyTo=L.ffReplyTo||L.ff_reply_to||L.replyTo||L.reply_to||L.replyRecipient||L.reply_recipient||'';
@@ -138,6 +140,7 @@ async function openLead(id){
   availability=L.calendarStatus||'UNKNOWN'; setAvailability(availability); out.value=L.suggestedResponse||'';
   missingBox.innerHTML=(L.missing&&L.missing.length)?'<b>Still useful to ask:</b> '+L.missing.map(esc).join(' · '):'<b>Lead loaded. Review only what this customer actually needs.</b>';
   applyLeadContext(L);
+  renderContactHistory(L);
   loadedLeadId=id;
 }
 function formatEstimate(estimate){
@@ -215,6 +218,7 @@ function buildRentalQuickAnswer(d){
   return {text:s,focus,missing};
 }document.querySelectorAll('[data-avail]').forEach(b=>b.onclick=()=>setAvailability(b.dataset.avail));f.onsubmit=e=>{
   e.preventDefault(); const d=v(),workspace=selectedWorkspace();
+  if(activeArchivedContact){out.value=archiveFollowup(d);updateArchiveContactLinks();missingBox.textContent='Archive follow-up draft. Review before sending.';return;}
   if(workspace==='Rentals'){
     const rental=buildRentalQuickAnswer(d);
     missingBox.innerHTML=(rental.missing.length?'<b>Still useful to ask:</b> '+rental.missing.join(' · '):'<b>Quick-answer focus:</b> '+rental.focus);
@@ -248,7 +252,7 @@ function buildRentalQuickAnswer(d){
 };
 function leadChanges(){
   const d=v();
-  return {calendarStatus:normalizeAvail(availability),eventDate:d.date,startTime:d.start,endTime:d.end,location:d.location,musicians:d.musicians,style:d.style,message:d.message,budget:d.budget,guestCount:d.guestCount,eventType:d.eventType,fee:d.fee||null,deposit:d.deposit||null,notes:d.notes};
+  return {...(backendSupportsArchive?{name:d.name,email:d.email,phone:d.phone,requestType:d.request}:{}),calendarStatus:normalizeAvail(availability),eventDate:d.date,startTime:d.start,endTime:d.end,location:d.location,musicians:d.musicians,style:d.style,message:d.message,budget:d.budget,guestCount:d.guestCount,eventType:d.eventType,fee:d.fee||null,deposit:d.deposit||null,notes:d.notes};
 }
 async function saveLead(markWaiting=false){
   const button=document.querySelector(markWaiting?'#markSent':'#saveLead');
@@ -265,7 +269,7 @@ document.querySelector('#copyFast').onclick=async()=>{await navigator.clipboard.
 document.querySelector('#markSent').onclick=()=>saveLead(true);
 document.querySelector('#saveLead').onclick=()=>saveLead();
 ['thumbtackPrice','leadCost'].forEach(name=>{f.elements[name].readOnly=true});
-document.querySelectorAll('[data-hub]').forEach(b=>b.onclick=()=>{activeHub=b.dataset.hub;document.querySelectorAll('[data-hub]').forEach(x=>x.classList.remove('active'));b.classList.add('active');renderHub()});document.querySelector('#unlockInbox')?.addEventListener('click',unlockInbox);document.querySelector('#lockInbox')?.addEventListener('click',lockInbox);loadLeads();setInterval(()=>{if(adminToken())loadLeads()},5000);window.addEventListener('focus',()=>{if(adminToken())loadLeads()});
+document.querySelectorAll('[data-hub]').forEach(b=>b.onclick=()=>{activeHub=b.dataset.hub;document.querySelectorAll('[data-hub]').forEach(x=>x.classList.remove('active'));b.classList.add('active');renderHub()});document.querySelector('#unlockInbox')?.addEventListener('click',unlockInbox);document.querySelector('#lockInbox')?.addEventListener('click',lockInbox);loadLeads();setInterval(()=>{if(!adminToken()){if(allLeads.length)lockInbox();return;}if(activeQueue==='ACTIVE')loadLeads()},5000);window.addEventListener('focus',()=>{if(adminToken())loadLeads()});
 let setupCount=0;
 function addSetup(){
  setupCount++;
@@ -369,3 +373,37 @@ function customerProposalHTML(){const d=v(),a=proposalChoice('a'),b=proposalChoi
 function syncMoneyFields(){const d=v(),fee=Number(d.fee||0),dep=Number(d.deposit||0);if(f.elements.balance&&!f.elements.balance.dataset.manual)f.elements.balance.value=fee?Math.max(0,fee-dep):'';if(f.elements.proposalNumber&&!f.elements.proposalNumber.value&&d.date)f.elements.proposalNumber.value=proposalNo(d)}
 f.elements.fee?.addEventListener('input',syncMoneyFields);f.elements.deposit?.addEventListener('input',syncMoneyFields);f.elements.date?.addEventListener('change',syncMoneyFields);f.elements.balance?.addEventListener('input',()=>f.elements.balance.dataset.manual='1');
 const beforeFormalBuild=buildDocument;buildDocument=function(mode){beforeFormalBuild(mode);const box=document.querySelector('#documentPreview');box.innerHTML=customerProposalHTML()+(mode==='both'?'<h3 class="choice-heading">PERFORMANCE OPTIONS</h3>'+box.innerHTML:'')};
+
+
+function archiveFollowup(d){
+  const first=String(d.name||'there').trim().split(/\s+/)[0],lesson=/lesson/i.test(d.request||'');
+  return 'Hi '+first+' — Nick Laudani here. We connected through Thumbtack about '+(lesson?'piano lessons':'live music')+'. If you are looking for '+(lesson?'lessons':'music for an upcoming event')+', I would be glad to hear what you have in mind. Send me a couple of times that work for a quick call.\n\nNick Laudani\n617-233-2008';
+}
+function updateArchiveContactLinks(){
+  const d=v(),phone=String(d.phone||'').trim(),email=String(d.email||'').trim(),call=document.querySelector('#archiveCall'),draft=document.querySelector('#archiveEmailDraft');
+  call.hidden=!phone;if(phone)call.href='tel:'+phone.replace(/[^+0-9]/g,'');
+  draft.hidden=!email||!f.elements.email.checkValidity();
+  if(!draft.hidden)draft.href='mailto:'+encodeURIComponent(email)+'?subject='+encodeURIComponent('A note from Nick Laudani')+'&body='+encodeURIComponent(out.value||archiveFollowup(d));
+}
+function renderContactHistory(L){
+  const entries=L.contactHistory||[],panel=document.querySelector('#contactHistoryPanel');panel.hidden=!entries.length;
+  document.querySelector('#contactHistorySummary').textContent=entries.length+' original export records'+(L.archived?' · archived contact':' · attached to this active lead');
+  document.querySelector('#contactHistoryRows').innerHTML=entries.map(entry=>{const raw=entry.raw||{};return '<tr>'+[niceDate(entry.contactDate),raw.Category,[raw['Zip Code'],raw.State].filter(Boolean).join(', '),raw['Job Status'],raw['Lead Cost']||'Not supplied'].map(value=>'<td>'+esc(value)+'</td>').join('')+'</tr>';}).join('');
+  updateArchiveContactLinks();
+}
+['email','phone','name'].forEach(name=>f.elements[name].addEventListener('input',updateArchiveContactLinks));out.addEventListener('input',updateArchiveContactLinks);
+document.querySelectorAll('[data-queue]').forEach(button=>button.addEventListener('click',()=>{
+  activeQueue=button.dataset.queue;activeLeadId=null;loadedLeadId=null;activeArchivedContact=false;
+  f.reset();out.value='';document.querySelector('#contactHistoryPanel').hidden=true;document.querySelector('#documentPreview').classList.add('hidden');
+  document.querySelectorAll('[data-queue]').forEach(item=>item.classList.toggle('active',item===button));loadLeads();
+}));
+document.querySelector('#refreshArchive').onclick=()=>{workerContractChecked=false;loadLeads();};
+document.querySelector('#exportArchiveEmails').onclick=()=>{
+  const contacts=allLeads.filter(lead=>lead.archived&&String(lead.email||'').trim());
+  if(!contacts.length){document.querySelector('#archiveExportStatus').textContent='No email addresses saved yet. Open a contact, add their email and choose Save lead.';return;}
+  const quote=value=>'"'+String(value??'').replaceAll('"','""')+'"';
+  const rows=[['Customer Name','Email','Phone','Source','Last Contact Date'],...contacts.map(lead=>[lead.name,lead.email,lead.phone,lead.source,lead.contactDate])];
+  const url=URL.createObjectURL(new Blob(['\uFEFF'+rows.map(row=>row.map(quote).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'})),link=document.createElement('a');
+  link.href=url;link.download='reachout-archive-email-contacts.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  document.querySelector('#archiveExportStatus').textContent=contacts.length+' email contacts exported. No messages were sent.';
+};
