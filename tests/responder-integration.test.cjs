@@ -1,0 +1,32 @@
+// npm install --no-save jsdom; REACHOUT_WORKER=/path/to/deployed-source.mjs node tests/responder-integration.test.cjs
+const {JSDOM}=require('jsdom');
+const fs=require('node:fs');const path=require('node:path');const assert=require('node:assert/strict');const {pathToFileURL}=require('node:url');
+(async()=>{
+ const root=path.resolve(__dirname,'..');
+ const workerPath=process.env.REACHOUT_WORKER;if(!workerPath)throw Error('Set REACHOUT_WORKER to the supplied RA-20261016-02 Worker source');
+ const worker=(await import(pathToFileURL(workerPath))).default;
+ const values=new Map();const kv={get:async k=>values.get(k)||null,put:async(k,v)=>values.set(k,v),delete:async k=>values.delete(k)};
+ const initial={id:'integration-test',source:'THUMBTACK',workspace:'LIVE MUSIC',requestType:'Piano Lessons',name:'Test student',email:'student@example.test',phone:'5550100',instrumentation:'Custom piano and flute',genres:'Jazz',travelOptions:['Remote','In person'],studentAge:'18–25',studentExperience:'Self-taught',readsMusic:'Yes',hasPiano:'Piano',preferredDays:'Weekday mornings',lessonDuration:'60 minutes',eventDate:'2026-11-02',startTime:'9:30 AM',guestCount:0,introOffer:false,notes:'Owner note',responseDraft:'Saved response',calendarStatus:'UNKNOWN'};
+ values.set('lead:'+initial.id,JSON.stringify(initial));values.set('index:leads',JSON.stringify([initial]));
+ const env={REACHOUT_LEADS:kv,REACHOUT_ADMIN_TOKEN:'test-only'};
+ const dom=new JSDOM(fs.readFileSync(path.join(root,'responder.html'),'utf8'),{url:'https://music.reachoutanswer.me/responder',runScripts:'outside-only',pretendToBeVisual:true});const w=dom.window;
+ w.fetch=(url,opts={})=>worker.fetch(new Request(url,opts),env);
+ w.localStorage.setItem('REACHOUT_ADMIN_TOKEN','test-only');w.localStorage.setItem('REACHOUT_ADMIN_TOKEN_EXPIRES',String(Date.now()+600000));
+ w.HTMLElement.prototype.scrollIntoView=function(){};w.setInterval=()=>0;
+ for(const file of ['responder-fields.js','responder.js'])w.eval(fs.readFileSync(path.join(root,file),'utf8'));
+ await w.eval('loadLeads()');await w.openLead(initial.id);
+ const form=w.document.querySelector('#fastLead'),field=n=>form.elements[n];
+ assert.equal(field('musicType').value,'Custom piano and flute');assert.equal(field('studentAge').value,'18–25');assert.equal(field('start').value,'09:30');
+ assert.equal(field('guestCount').value,'0');assert.equal(field('introOffer').checked,false);assert.equal(w.document.querySelector('#fastAnswer').value,'Saved response');
+ assert.deepEqual(JSON.parse(JSON.stringify(w.leadChanges().travelOptions)),['Remote','In person']);
+ field('meetingMethod').value='Zoom';field('musicType').value='Trio — with vocals';field('notes').value='';field('introOffer').checked=true;field('introPrice').value='25';field('introDuration').value='25';w.document.querySelector('#fastAnswer').value='Edited draft';
+ await w.saveLead();assert.equal(w.document.querySelector('#saveStatus').textContent,'Saved to your lead record.');
+ await w.openLead(initial.id);assert.equal(field('meetingMethod').value,'Zoom');assert.equal(field('musicType').value,'Trio — with vocals');assert.equal(field('notes').value,'');assert.equal(field('introPrice').value,'25');assert.equal(w.document.querySelector('#fastAnswer').value,'Edited draft');
+ w.document.querySelector('#buildLessonAnswer').click();assert.match(w.document.querySelector('#fastAnswer').value,/25-minute introductory lesson for \$25/);
+ for(const selector of ['#wordProposal','#printPdf','#copyPackage','#rentalSheet','#spinSheet','#archiveToolbar','.quote-actions'])assert.ok(w.document.querySelector(selector),selector+' preserved');
+ w.setSelect('request','Private Party');w.toggleLeadMode();assert.equal(w.document.querySelector('#eventSheet').classList.contains('hidden'),false);
+ w.buildDocument('both');assert.match(w.document.querySelector('#documentPreview').textContent,/Nicholas Laudani/);
+ const sent=w.leadChanges();assert.equal(w.ReachOutFields.mismatches(sent,{...sent,meetingMethod:undefined}).includes('meetingMethod'),true);
+ const prior=JSON.parse(values.get('lead:'+initial.id));prior.customerEmail='';prior.email='stale@example.test';prior.responseDraft='';values.set('lead:'+initial.id,JSON.stringify(prior));await w.openLead(initial.id);assert.equal(field('email').value,'');assert.equal(w.document.querySelector('#fastAnswer').value,'');
+ dom.window.close();console.log('PASS: actual frontend + supplied Worker save/reopen, custom values, arrays, zero, false, clears, drafts, lesson offer, proposal rendering and workspace controls');
+})().catch(e=>{console.error(e);process.exitCode=1});
