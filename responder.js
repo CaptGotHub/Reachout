@@ -1,4 +1,4 @@
-const API='https://reachout-respond.cptnspacetime.workers.dev';
+const API='https://api.reachoutanswer.me';
 const TOKEN_KEY='REACHOUT_ADMIN_TOKEN';
 const TOKEN_EXPIRY_KEY='REACHOUT_ADMIN_TOKEN_EXPIRES';
 const TRUST_MS=8*60*60*1000;
@@ -68,7 +68,7 @@ function leadMatchesHub(L,hub){
   return inferSource(L).toUpperCase()===hub;
 }
 function setField(name,value){
-  const el=f.elements[name]; if(!el||value===undefined||value===null)return; el.value=String(value);
+  const el=f.elements[name]; if(!el||value===undefined||value===null)return; if(el.tagName==='SELECT'){setSelect(name,value);return;} el.value=String(value);
 }
 function selectedWorkspace(){return document.querySelector('#workspace')?.value||'All'}
 function selectedSource(){return document.querySelector('#source')?.value||'Other'}
@@ -121,7 +121,7 @@ async function openLead(id){
   activeDirectEmail=L.directEmail||L.direct_email||L.email||'';
   activeReplyMode=L.replyMode||L.reply_mode||(activeReplyTo&&/@leads\.furnishedfinder\.com$/i.test(activeReplyTo)?'furnished_finder_conversation':(activeDirectEmail?'direct_email':'manual_furnished_finder'));
   setField('name',L.name||L.firstName||L.customerName||'');
-  setField('email',L.email||''); setField('phone',L.phone||''); setField('venueContact',L.venueContact||'');
+  setField('email',L.customerEmail??L.email??''); setField('phone',L.customerPhone??L.phone??''); setField('venueContact',L.venueContact||'');
   setField('guestCount',L.guestCount??''); setField('guestAge',L.guestAge||''); setField('musicType',L.musicType||'');
   setField('budget',L.budget??''); setField('travelPreference',L.travelPreference||''); setField('thumbtackPrice',formatEstimate(L.estimate)||L.thumbtackPrice||'');
   setField('leadCost',L.leadPrice??L.leadCost??''); setField('competition',L.competition||''); setField('included',L.included||'');
@@ -137,8 +137,9 @@ async function openLead(id){
   setField('rentalCall',L.rentalCall||L.wantsCall||'TBD'); setField('ffReplyTo',activeReplyTo); setField('directEmail',activeDirectEmail); setField('rentalReplyFocus',L.rentalReplyFocus||'Auto-detect'); setField('rentalQuestions',L.rentalQuestions||L.questions||'');
   setField('spinTopic',L.spinTopic||L.topic||'TBD'); setField('spinAIN',L.ain||L.AIN||''); setField('spinMintId',L.mintId||L.mint_id||'');
   setField('spinTier',L.tier||L.productTier||''); setField('spinQuestion',L.spinQuestion||L.question||'');
-  availability=L.calendarStatus||'UNKNOWN'; setAvailability(availability); out.value=L.suggestedResponse||'';
+  availability=L.calendarStatus||'UNKNOWN'; setAvailability(availability); out.value=L.responseDraft??L.suggestedResponse??'';
   missingBox.innerHTML=(L.missing&&L.missing.length)?'<b>Still useful to ask:</b> '+L.missing.map(esc).join(' · '):'<b>Lead loaded. Review only what this customer actually needs.</b>';
+  ReachOutFields.populate(f,L,setField);
   applyLeadContext(L);
   renderContactHistory(L);
   loadedLeadId=id;
@@ -219,6 +220,7 @@ function buildRentalQuickAnswer(d){
 }document.querySelectorAll('[data-avail]').forEach(b=>b.onclick=()=>setAvailability(b.dataset.avail));f.onsubmit=e=>{
   e.preventDefault(); const d=v(),workspace=selectedWorkspace();
   if(activeArchivedContact){out.value=archiveFollowup(d);updateArchiveContactLinks();missingBox.textContent='Archive follow-up draft. Review before sending.';return;}
+  if(workspace==='Live Music'&&lessonMode()){document.querySelector('#buildLessonAnswer').click();return;}
   if(workspace==='Rentals'){
     const rental=buildRentalQuickAnswer(d);
     missingBox.innerHTML=(rental.missing.length?'<b>Still useful to ask:</b> '+rental.missing.join(' · '):'<b>Quick-answer focus:</b> '+rental.focus);
@@ -252,7 +254,7 @@ function buildRentalQuickAnswer(d){
 };
 function leadChanges(){
   const d=v();
-  return {...(backendSupportsArchive?{name:d.name,email:d.email,phone:d.phone,requestType:d.request}:{}),calendarStatus:normalizeAvail(availability),eventDate:d.date,startTime:d.start,endTime:d.end,location:d.location,musicians:d.musicians,style:d.style,message:d.message,budget:d.budget,guestCount:d.guestCount,eventType:d.eventType,fee:d.fee||null,deposit:d.deposit||null,notes:d.notes};
+  return {...ReachOutFields.collect(f),calendarStatus:normalizeAvail(availability),responseDraft:out.value};
 }
 async function saveLead(markWaiting=false){
   const button=document.querySelector(markWaiting?'#markSent':'#saveLead');
@@ -261,14 +263,17 @@ async function saveLead(markWaiting=false){
   const changes=leadChanges(); if(markWaiting)changes.status='WAITING';
   try{
     const r=await apiFetch(API+'/api/leads/'+encodeURIComponent(activeLeadId),{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(changes)});
-    button.textContent=r.ok?(markWaiting?'Marked waiting':'Lead saved'):'Update failed';
+    const result=await r.json();
+    const mismatches=r.ok?ReachOutFields.mismatches(changes,result.lead):[];
+    button.textContent=r.ok?(mismatches.length?'Save incomplete — see details':(markWaiting?'Marked waiting':'Lead saved')):'Update failed';
+    document.querySelector('#saveStatus').textContent=mismatches.length?'Worker did not return the saved values for: '+mismatches.join(', '):r.ok?'Saved to your lead record.':(result.error||'Could not save. Your edits remain in the form.');
     if(r.ok)await loadLeads();
   }catch{button.textContent='Update failed'}
 }
 document.querySelector('#copyFast').onclick=async()=>{await navigator.clipboard.writeText(out.value);document.querySelector('#copyFast').textContent='Copied'};
 document.querySelector('#markSent').onclick=()=>saveLead(true);
 document.querySelector('#saveLead').onclick=()=>saveLead();
-['thumbtackPrice','leadCost'].forEach(name=>{f.elements[name].readOnly=true});
+
 document.querySelectorAll('[data-hub]').forEach(b=>b.onclick=()=>{activeHub=b.dataset.hub;document.querySelectorAll('[data-hub]').forEach(x=>x.classList.remove('active'));b.classList.add('active');renderHub()});document.querySelector('#unlockInbox')?.addEventListener('click',unlockInbox);document.querySelector('#lockInbox')?.addEventListener('click',lockInbox);loadLeads();setInterval(()=>{if(!adminToken()){if(allLeads.length)lockInbox();return;}if(activeQueue==='ACTIVE')loadLeads()},5000);window.addEventListener('focus',()=>{if(adminToken())loadLeads()});
 let setupCount=0;
 function addSetup(){
@@ -330,13 +335,26 @@ function toggleLeadMode(){
   document.querySelector('#eventSheet')?.classList.toggle('hidden',!event);
   document.querySelector('.proposal-choices')?.classList.toggle('hidden',!event);
   document.querySelector('.quote-actions')?.classList.toggle('hidden',!event);
+  for(const name of ['date','start','end','guestCount','guestAge','musicians','musicType','musicianCount']) f.elements[name]?.closest('label')?.classList.toggle('hidden',lesson);
   syncContextLabels();
 }
 f.elements.request?.addEventListener('change',toggleLeadMode);
 document.querySelector('#workspace')?.addEventListener('change',toggleLeadMode);
 document.querySelector('#source')?.addEventListener('change',e=>{if(e.target.value==='Furnished Finder')document.querySelector('#workspace').value='Rentals';toggleLeadMode()});
 toggleLeadMode();
-document.querySelector('#buildLessonAnswer').onclick=()=>{const d=v(),name=d.name||'there';let s='Hi '+name+' — thanks for reaching out about lessons. I’d be glad to learn a little about what you want to work on and see what kind of lesson setup makes the most sense.';if(d.lessonInstrument)s+=' I saw that you are interested in '+d.lessonInstrument+' lessons.';if(d.lessonFormat&&d.lessonFormat!=='TBD')s+=' '+d.lessonFormat+' can work as the lesson format.';if(d.lessonFrequency&&d.lessonFrequency!=='TBD')s+=' You indicated '+d.lessonFrequency.toLowerCase()+'.';if(d.studentLevel&&d.studentLevel!=='TBD')s+=' Your '+d.studentLevel.toLowerCase()+' level is helpful to know.';if(d.lessonGoals)s+=' I also saw that you would like to work on '+d.lessonGoals+'.';const missing=[];if(!d.lessonTimes||d.lessonTimes==='TBD')missing.push('days/times that work best');if(!d.lessonFormat||d.lessonFormat==='TBD')missing.push('whether you prefer in-person or online');if(missing.length)s+=' To figure out a good first lesson, let me know '+missing.join(' and ')+'.';else s+=' I can use those details to work out a good first lesson time.';s+='\n\nNick Laudani\n617-233-2008';out.value=s;missingBox.innerHTML='<b>Lesson workflow:</b> availability and first-lesson scheduling';out.scrollIntoView({behavior:'smooth'})};
+document.querySelector('#buildLessonAnswer').onclick=()=>{
+ const d=v();let text='Hi '+(d.name||'there')+' — thanks for reaching out about piano lessons.';
+ if(d.studentLevel)text+=' I noted your experience: '+d.studentLevel+'.';
+ if(d.lessonGoals)text+=' We can discuss your goals: '+d.lessonGoals+'.';
+ if(d.lessonTimes)text+=' You mentioned '+d.lessonTimes+'.';
+ if(d.meetingMethod)text+=' Your selected meeting method is '+d.meetingMethod+'.';
+ if(f.elements.introOffer.checked&&d.introPrice&&d.introDuration)text+=' I offer a '+d.introDuration+'-minute introductory lesson for $'+d.introPrice+'.';
+ if(d.lessonRate)text+=' My regular lesson price is '+d.lessonRate+'.';
+ text+=' What music would you most enjoy learning?';
+ if(!d.lessonTimes)text+=' Which days and times work for you?';
+ if(!d.meetingMethod)text+=' Would online or in-person lessons suit you?';
+ out.value=text+'\n\nNick Laudani\n617-233-2008';missingBox.textContent='Lesson draft — review the offer and scheduling before sending.';
+};
 
 function proposalTextLines(){const d=v(),a=proposalChoice('a'),b=proposalChoice('b');return[
 'Nicholas Laudani — Live Music',
@@ -407,3 +425,7 @@ document.querySelector('#exportArchiveEmails').onclick=()=>{
   link.href=url;link.download='reachout-archive-email-contacts.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   document.querySelector('#archiveExportStatus').textContent=contacts.length+' email contacts exported. No messages were sent.';
 };
+
+// Keep custom instrument choices selectable and persistent.
+document.querySelector('#applyInstrumentation').onclick=()=>{const el=document.querySelector('#customInstrumentation');if(el.value.trim()){setSelect('musicType',el.value.trim());el.value='';}};
+for(const name of ['lessonInstrument','lessonFormat','lessonLocation','lessonFrequency','lessonNotes','soundProvider','foodDrink']){const label=f.elements[name]?.closest('label');if(label){const note=document.createElement('small');note.textContent='Session only';label.appendChild(note);}}
