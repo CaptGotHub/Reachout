@@ -43,6 +43,7 @@ export function normalizeLead(input = {}) {
   lead.serviceCode=serviceCode(lead);
   if(isLesson(lead)||!lead.workspace)lead.workspace=workspaceFor(lead);
   const lesson=isLesson(lead);
+  for(const [field,legacy] of Object.entries({studentLevel:'studentExperience',lessonTimes:'preferredDays',lessonLength:'lessonDuration',lessonFormat:'meetingMethod',lessonGoals:'studentGoals',travelPreference:'travelOptions',musicType:'genres',venueContact:'secondaryContact'}))put(field,lead[legacy]);
   if (lesson) {
     put('studentName',lead.name);put('studentAge',lead.guestAge);put('lessonLocation',lead.location);
     if(lead.serviceCode==='PIANO_LESSON')put('lessonInstrument','Piano');

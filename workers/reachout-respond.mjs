@@ -44,6 +44,7 @@ function normalizeLead(input = {}) {
   lead.serviceCode=serviceCode(lead);
   if(isLesson(lead)||!lead.workspace)lead.workspace=workspaceFor(lead);
   const lesson=isLesson(lead);
+  for(const [field,legacy] of Object.entries({studentLevel:'studentExperience',lessonTimes:'preferredDays',lessonLength:'lessonDuration',lessonFormat:'meetingMethod',lessonGoals:'studentGoals',travelPreference:'travelOptions',musicType:'genres',venueContact:'secondaryContact'}))put(field,lead[legacy]);
   if (lesson) {
     put('studentName',lead.name);put('studentAge',lead.guestAge);put('lessonLocation',lead.location);
     if(lead.serviceCode==='PIANO_LESSON')put('lessonInstrument','Piano');
@@ -72,6 +73,7 @@ function normalizeLead(input = {}) {
   return lead;
 }
 // END SHARED LEAD MODEL
+import { handleThumbtack } from "./thumbtack.mjs";
 /**
  * ReachOut Answer
  * Worker: reachout-respond
@@ -82,6 +84,9 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
+      if (url.pathname.startsWith("/oauth/thumbtack/") || url.pathname === "/api/admin/thumbtack" || url.pathname.startsWith("/api/admin/thumbtack/")) {
+        return await handleThumbtack(request, env, url, { checkAuth, apiJson, apiCors, json, receiveThumbtack });
+      }
       if (request.method === "GET" && url.pathname === "/") {
         return json({ ok: true, service: "ReachOut Answer", version: "RA-20261030-01-lessons", status: "online" });
       }
@@ -136,6 +141,8 @@ export default {
   }
 };
 
+const LEGACY_FIELD_MAP = { venueContact: "secondaryContact", musicType: "genres", travelPreference: "travelOptions" };
+
 function checkAuth(request, env) {
   if (!env.REACHOUT_ADMIN_TOKEN) return false;
   const header = request.headers.get("Authorization") || "";
@@ -160,7 +167,8 @@ async function receiveThumbtack(request, env) {
   const externalLeadId = deepFind(payload, ["lead_id", "leadId"]);
   const eventId = deepFind(payload, ["event_id", "eventId"]) || crypto.randomUUID();
   const customerKey = safeId(String((fields.name || "") + "|" + (fields.phone || "") + "|" + (fields.email || "")).toLowerCase());
-  const leadId = customerKey ? "thumbtack-" + customerKey : "thumbtack-" + safeId(String(negotiationId || conversationId || externalLeadId || eventId));
+  const legacyLeadId = customerKey ? "thumbtack-" + customerKey : "thumbtack-" + safeId(String(negotiationId || conversationId || externalLeadId || eventId));
+  const leadId = await resolveLeadId(env, negotiationId, legacyLeadId);
   let lead = await readJSON(env.REACHOUT_LEADS, "lead:" + leadId);
   if (!lead) { lead = { id: leadId, source: "THUMBTACK", workspace: "LIVE MUSIC", status: "NEW", createdAt: now, eventCount: 0, eventIds: [] }; }
   lead.updatedAt = now;
@@ -169,6 +177,7 @@ async function receiveThumbtack(request, env) {
   lead.eventIds.push(String(eventId));
   lead.negotiationId = negotiationId || lead.negotiationId || null;
   lead.conversationId = conversationId || lead.conversationId || null;
+  if (!lead.originalInquiry) { lead.originalInquiry = { name: fields.name, message: fields.message, requestType: fields.requestType, eventDate: fields.eventDate, location: fields.location, raw: payload }; }
   lead.name = fields.name || lead.name || null;
   lead.firstName = fields.firstName || lead.firstName || null;
   lead.email = fields.email || lead.email || null;
@@ -188,8 +197,42 @@ async function receiveThumbtack(request, env) {
   lead.eventType = fields.eventType || lead.eventType || null;
   lead.leadPrice = fields.leadPrice || lead.leadPrice || null;
   lead.estimate = fields.estimate || lead.estimate || null;
+  lead.customerEmail = fields.customerEmail || lead.customerEmail || null;
+  lead.customerPhone = fields.customerPhone || lead.customerPhone || null;
+  lead.platformReplyAddress = fields.platformReplyAddress || lead.platformReplyAddress || null;
+  lead.ownerNotificationAddress = fields.ownerNotificationAddress || lead.ownerNotificationAddress || null;
+  lead.secondaryContact = fields.secondaryContact || lead.secondaryContact || null;
+  if (!(lead.detailOverrides||[]).includes("studentAge")) lead.studentAge = fields.studentAge || lead.studentAge || null;
+  lead.studentExperience = fields.studentExperience || lead.studentExperience || null;
+  lead.readsMusic = fields.readsMusic || lead.readsMusic || null;
+  lead.hasPiano = fields.hasPiano || lead.hasPiano || null;
+  lead.preferredDays = fields.preferredDays || lead.preferredDays || null;
+  lead.lessonDuration = fields.lessonDuration || lead.lessonDuration || null;
+  lead.meetingMethod = fields.meetingMethod || lead.meetingMethod || null;
+  lead.meetingLink = fields.meetingLink || lead.meetingLink || null;
+  lead.travelOptions = fields.travelOptions || lead.travelOptions || null;
+  lead.genres = fields.genres || lead.genres || null;
+  lead.instrumentation = fields.instrumentation || lead.instrumentation || null;
+  lead.musicianCount = fields.musicianCount || lead.musicianCount || null;
+  lead.regularPrice = fields.regularPrice || lead.regularPrice || null;
+  lead.studentGoals = fields.studentGoals || lead.studentGoals || null;
+  lead.teacherRecommends = fields.teacherRecommends || lead.teacherRecommends || null;
+  lead.loadIn = fields.loadIn || lead.loadIn || null;
+  lead.sound = fields.sound || lead.sound || null;
+  lead.microphones = fields.microphones || lead.microphones || null;
+  lead.power = fields.power || lead.power || null;
+  lead.parking = fields.parking || lead.parking || null;
+  lead.dressCode = fields.dressCode || lead.dressCode || null;
+  lead.specialSongs = fields.specialSongs || lead.specialSongs || null;
+  lead.instructions = fields.instructions || lead.instructions || null;
+  if (!(lead.detailOverrides||[]).includes("guestAge")) lead.guestAge = fields.guestAge || lead.guestAge || null;
+  if (!(lead.detailOverrides||[]).includes("competition")) lead.competition = fields.competition || lead.competition || null;
+  if (!(lead.detailOverrides||[]).includes("included")) lead.included = fields.included || lead.included || null;
+  lead.customerBudget = fields.customerBudget || lead.customerBudget || null;
+  lead.leadCost = fields.leadCost || lead.leadCost || null;
+  lead.thumbtackPrice = fields.thumbtackPrice || lead.thumbtackPrice || null;
   lead.calendarStatus = lead.calendarStatus || "UNKNOWN";
-  lead.latestRaw = payload;
+  applyThumbtackEvent(lead, payload, fields, now);
   Object.assign(lead,normalizeLead(lead));
   lead.missing = missingFields(lead);
   lead.suggestedResponse = makeResponse(lead);
@@ -234,21 +277,27 @@ async function patchLead(id, request, env) {
   if (!lead) return apiJson({ ok: false, error: "lead_not_found" }, 404);
   let changes;
   try { changes = await request.json(); } catch { return apiJson({ ok: false, error: "invalid_json" }, 400); }
-  const allowed = ["status","calendarStatus","eventDate","startTime","endTime","location","musicians","style","message","budget","guestCount","eventType","fee","deposit","notes","name","email","phone","requestType","archived","serviceCode","workspace",...DETAIL_FIELDS];
+  const allowed = ["status","calendarStatus","archived","name","firstName","customerEmail","customerPhone","platformReplyAddress","ownerNotificationAddress","secondaryContact","requestType","eventType","message","originalInquiry","eventDate","startTime","endTime","location","address","guestCount","guestAge","meetingMethod","meetingLink","travelOptions","instrumentation","musicianCount","genres","musicians","style","loadIn","sound","microphones","power","parking","dressCode","specialSongs","instructions","studentAge","studentExperience","readsMusic","hasPiano","preferredDays","lessonDuration","studentGoals","teacherRecommends","regularPrice","introOffer","introPrice","introDuration","customerBudget","leadPrice","leadCost","thumbtackPrice","estimate","fee","deposit","budget","competition","included","responseDraft","notes","email","phone","serviceCode","workspace",...DETAIL_FIELDS];
   if (!changes || typeof changes !== "object" || Array.isArray(changes)) return apiJson({ ok: false, error: "invalid_changes" }, 400);
   if ("archived" in changes && typeof changes.archived !== "boolean") return apiJson({ ok: false, error: "invalid_archive_state" }, 400);
   for (const field of ["name","email","phone","requestType"]) {
     if (field in changes && changes[field] !== null && (typeof changes[field] !== "string" || changes[field].length > 500)) return apiJson({ ok: false, error: "invalid_contact_field" }, 400);
   }
+  for (const [legacy, modern] of Object.entries(LEGACY_FIELD_MAP)) { if (legacy in changes && !(modern in changes)) { changes[modern] = changes[legacy]; } }
   for (const field of [...DETAIL_FIELDS,"serviceCode","workspace"]) {
     if (field in changes && changes[field] !== null && (typeof changes[field] !== "string" || changes[field].length > 12000)) return apiJson({ok:false,error:"invalid_detail_field",field},400);
   }
   for (const field of allowed) { if (field in changes) { lead[field] = changes[field]; } }
+  if ("status" in changes && !("archived" in changes)) { if (changes.status === "archived") lead.archived = true; else if (lead.archived === true) lead.archived = false; }
   lead.detailOverrides=[...new Set([...(lead.detailOverrides||[]),...[...DETAIL_FIELDS,"requestType"].filter(field=>field in changes)])];
   lead.serviceCode = serviceCode(lead); lead.workspace = workspaceFor(lead);
   lead.updatedAt = new Date().toISOString();
   lead.missing = missingFields(lead);
   lead.suggestedResponse = makeResponse(lead);
+  if ("customerEmail" in changes) lead.email = changes.customerEmail;
+  if ("customerPhone" in changes) lead.phone = changes.customerPhone;
+  if ("email" in changes && !("customerEmail" in changes)) lead.customerEmail = changes.email;
+  if ("phone" in changes && !("customerPhone" in changes)) lead.customerPhone = changes.phone;
   await env.REACHOUT_LEADS.put("lead:" + id, JSON.stringify(lead));
   await updateIndex(env, lead);
   return apiJson({ ok: true, lead: normalizeLead(lead) });
@@ -260,14 +309,37 @@ function leadSummary(lead) {
     serviceCode:lead.serviceCode,
     id: lead.id, source: lead.source, workspace: lead.workspace, status: lead.status,
     name: lead.name || lead.firstName || "New Thumbtack Lead",
-    phone: lead.phone || null, email: lead.email || null,
+    customerPhone: lead.customerPhone || lead.phone || null, customerEmail: lead.customerEmail || lead.email || null,
+    phone: lead.customerPhone || lead.phone || null, email: lead.customerEmail || lead.email || null,
+    platformReplyAddress: lead.platformReplyAddress || null, ownerNotificationAddress: lead.ownerNotificationAddress || null,
+    secondaryContact: lead.secondaryContact || lead.venueContact || null,
     requestType: lead.requestType, eventDate: lead.eventDate, startTime: lead.startTime, endTime: lead.endTime,
-    location: lead.location, calendarStatus: lead.calendarStatus, eventCount: lead.eventCount, updatedAt: lead.updatedAt,
+    location: lead.location, address: lead.address || null, calendarStatus: lead.calendarStatus,
+    eventCount: lead.eventCount, updatedAt: lead.updatedAt,
     musicians: lead.musicians || null, style: lead.style || null, budget: lead.budget || null,
-    guestCount: lead.guestCount || null, eventType: lead.eventType || null,
-    leadPrice: lead.leadPrice ?? null, estimate: lead.estimate || null,
-    message: lead.message || null, missing: lead.missing || [], suggestedResponse: lead.suggestedResponse || null,
-    recordType: lead.recordType || null, contactDate: lead.contactDate || null, archived: lead.archived === true,
+    guestCount: lead.guestCount || null, guestAge: lead.guestAge || null, eventType: lead.eventType || null,
+    meetingMethod: lead.meetingMethod || null, meetingLink: lead.meetingLink || null, travelOptions: lead.travelOptions || lead.travelPreference || null,
+    instrumentation: lead.instrumentation || null, musicianCount: lead.musicianCount || null, genres: lead.genres || lead.musicType || null,
+    loadIn: lead.loadIn || null, sound: lead.sound || null, microphones: lead.microphones || null,
+    power: lead.power || null, parking: lead.parking || null, dressCode: lead.dressCode || null,
+    specialSongs: lead.specialSongs || null, instructions: lead.instructions || null,
+    studentAge: lead.studentAge || null, studentExperience: lead.studentExperience || null,
+    readsMusic: lead.readsMusic || null, hasPiano: lead.hasPiano || null,
+    preferredDays: lead.preferredDays || null, lessonDuration: lead.lessonDuration || null,
+    studentGoals: lead.studentGoals || null, teacherRecommends: lead.teacherRecommends || null,
+    regularPrice: lead.regularPrice ?? null, introOffer: lead.introOffer ?? null,
+    introPrice: lead.introPrice ?? null, introDuration: lead.introDuration ?? null,
+    customerBudget: lead.customerBudget ?? null, leadPrice: lead.leadPrice ?? null,
+    leadCost: lead.leadCost ?? null, thumbtackPrice: lead.thumbtackPrice ?? null,
+    estimate: lead.estimate || null, fee: lead.fee ?? null, deposit: lead.deposit ?? null,
+    competition: lead.competition || null, included: lead.included || null,
+    message: lead.message || null, missing: lead.missing || [],
+    suggestedResponse: lead.suggestedResponse || null, responseDraft: lead.responseDraft || null,
+    recordType: lead.recordType || null, contactDate: lead.contactDate || null,
+    inquiryKind: inquiryKind(lead), zip: lead.zip || null, travelRange: lead.travelRange || null, venue: lead.venue || null,
+    instrumentAtHome: lead.instrumentAtHome || null, schedulingNote: lead.schedulingNote || null,
+    conversationCount: (lead.conversation || []).length, lastCustomerMessage: lead.lastCustomerMessage || null, lastCustomerMessageAt: lead.lastCustomerMessageAt || null,
+    archived: lead.archived === true,
     contactHistoryCount: (lead.contactHistory || []).length,
     contactImportKeys: (lead.contactHistory || []).map(entry => entry.key)
   };
@@ -437,6 +509,24 @@ async function reindexLeads(env) {
       if (!(lead.detailOverrides||[]).includes("requestType")) lead.requestType = fields.requestType || lead.requestType || "Other";
   if (payload.data?.request || payload.request) lead.sourceRequest = payload;
   for (const field of DETAIL_FIELDS) { if (fields[field] !== undefined && fields[field] !== null && fields[field] !== "") lead[field] = fields[field]; }
+      if (!lead.customerEmail && fields.customerEmail) lead.customerEmail = fields.customerEmail;
+      if (!lead.customerPhone && fields.customerPhone) lead.customerPhone = fields.customerPhone;
+      if (!lead.studentAge && fields.studentAge) lead.studentAge = fields.studentAge;
+      if (!lead.studentExperience && fields.studentExperience) lead.studentExperience = fields.studentExperience;
+      if (!lead.readsMusic && fields.readsMusic) lead.readsMusic = fields.readsMusic;
+      if (!lead.hasPiano && fields.hasPiano) lead.hasPiano = fields.hasPiano;
+      if (!lead.preferredDays && fields.preferredDays) lead.preferredDays = fields.preferredDays;
+      if (!lead.lessonDuration && fields.lessonDuration) lead.lessonDuration = fields.lessonDuration;
+      if (!lead.meetingMethod && fields.meetingMethod) lead.meetingMethod = fields.meetingMethod;
+      if (!lead.travelOptions && fields.travelOptions) lead.travelOptions = fields.travelOptions;
+      if (!lead.genres && fields.genres) lead.genres = fields.genres;
+      if (!lead.instrumentation && fields.instrumentation) lead.instrumentation = fields.instrumentation;
+      if (!lead.regularPrice && fields.regularPrice) lead.regularPrice = fields.regularPrice;
+      if (!lead.studentGoals && fields.studentGoals) lead.studentGoals = fields.studentGoals;
+      if (!lead.teacherRecommends && fields.teacherRecommends) lead.teacherRecommends = fields.teacherRecommends;
+      if (!lead.guestAge && fields.guestAge) lead.guestAge = fields.guestAge;
+      if (!lead.competition && fields.competition) lead.competition = fields.competition;
+      if (!lead.included && fields.included) lead.included = fields.included;
     }
     allLeads.push({ key: key.name, lead });
   }
@@ -484,7 +574,7 @@ async function reindexLeads(env) {
   return apiJson({ ok: true, reindexed: mergedCount, count: index.length, leads: index });
 }
 
-function extractFields(payload) {
+function extractFieldsLegacy(payload) {
   const firstName = deepFind(payload, ["first_name", "firstName"]);
   const lastName = deepFind(payload, ["last_name", "lastName"]);
   let name = deepFind(payload, ["customer_name", "customerName", "displayName"]);
@@ -557,32 +647,134 @@ function extractFields(payload) {
   let requestType = deepFind(payload, ["service_name", "serviceName", "job_type", "jobType"]);
   const categoryName = deepGet(payload, ["data", "request", "category", "name"]);
   if (!requestType && categoryName) { requestType = categoryName; }
-  return normalizeLead({ name, firstName, email: customer?.email || deepFind(payload,["customer_email","customerEmail"]), phone: customer?.phoneNumber || customer?.phone || deepFind(payload,["phone","phone_number","phoneNumber"]), requestType: requestType || null, eventDate, startTime, endTime, location, message, musicians, style, budget, guestCount, eventType, leadPrice, estimate, sourceRequest:payload });
+  // --- Piano-lesson & extended fields from Thumbtack details Q&A ---
+  // 'details' is already declared above; reuse it
+  let studentAge=null,studentExperience=null,readsMusic=null,hasPiano=null,preferredDays=null;
+  let lessonDuration=null,meetingMethod=null,travelOptions=null,regularPrice=null;
+  let teacherRecommends=null,studentGoals=null,genres=null,instrumentation=null;
+  let loadIn=null,sound=null,microphones=null,power=null,parking=null,dressCode=null,specialSongs=null,instructions=null;
+  let guestAge=null,competition=null,included=null;
+  if (details && Array.isArray(details)) {
+    for (const d of details) {
+      if (!d.question || !d.answer) continue;
+      const q = String(d.question).toLowerCase(); const a = answerText(d.answer);
+      if (q.includes("age") && !studentAge) { studentAge = a; guestAge = a; }
+      if ((q.includes("experience")||q.includes("training")) && !studentExperience) studentExperience = a;
+      if ((q.includes("read")&&q.includes("music"))||q.includes("reads music")) readsMusic = normalizeReadsMusic(a);
+      if (q.includes("piano")&&(q.includes("own")||q.includes("have")||q.includes("keyboard"))) hasPiano = normalizeHasPiano(a);
+      if ((q.includes("day")||q.includes("time")||q.includes("schedule")||q.includes("availability")) && !preferredDays) preferredDays = a;
+      if (q.includes("duration")||q.includes("minute")||q.includes("length")) lessonDuration = a;
+      if (q.includes("virtual")||q.includes("remote")||q.includes("zoom")||q.includes("in person")||q.includes("in-person")||q.includes("online")||q.includes("meeting")||q.includes("lesson method")) { meetingMethod = normalizeMeetingMethod(a); travelOptions = a; }
+      if (q.includes("travel")||q.includes("location preference")||q.includes("come to")) travelOptions = travelOptions || a;
+      if (q.includes("price")||q.includes("rate")||q.includes("cost")) { if (!regularPrice) regularPrice = a; }
+      if (q.includes("teacher recommend")||q.includes("style preference")||q.includes("musical style")) { teacherRecommends = a; if (!genres) genres = a; }
+      if (q.includes("goal")||q.includes("want to learn")||q.includes("looking to")) studentGoals = a;
+      if (q.includes("load")&&q.includes("in")) loadIn = a;
+      if (q.includes("sound")&&!q.includes("sound system")) sound = a;
+      if (q.includes("microphone")||q.includes("mic ")) microphones = a;
+      if (q.includes("power")||q.includes("outlet")||q.includes("electric")) power = a;
+      if (q.includes("parking")) parking = a;
+      if (q.includes("dress")||q.includes("attire")) dressCode = a;
+      if (q.includes("song")&&(q.includes("special")||q.includes("request")||q.includes("first dance"))) specialSongs = a;
+      if (q.includes("instruction")||q.includes("note")||q.includes("anything else")) instructions = a;
+      if (q.includes("competition")||q.includes("other quotes")||q.includes("other vendor")) competition = a;
+      if (q.includes("included")||q.includes("what is included")||q.includes("package")) included = a;
+    }
+  }
+  return { name, firstName, customerEmail: extractCustomerEmail(payload), customerPhone: extractCustomerPhone(payload), email: extractCustomerEmail(payload), phone: extractCustomerPhone(payload), platformReplyAddress: deepGet(payload,["data","conversation","replyTo"]) || deepFind(payload,["reply_to","replyTo"]) || null, ownerNotificationAddress: detectOwnerNotification(payload), secondaryContact: null, requestType: requestType || "Live Music", eventDate, startTime, endTime, location, address: null, message, musicians, style, budget, guestCount, guestAge, eventType, meetingMethod, meetingLink: null, travelOptions, instrumentation, musicianCount: null, genres, loadIn, sound, microphones, power, parking, dressCode, specialSongs, instructions, studentAge, studentExperience, readsMusic, hasPiano, preferredDays, lessonDuration, studentGoals, teacherRecommends, regularPrice, leadPrice, leadCost: null, thumbtackPrice: null, competition, included, estimate };
 }
 
+function isLessonInquiry(lead) { return isLesson(lead); }
+
+function extractCustomerEmail(payload) {
+  const explicit = deepGet(payload, ["data","customer","email"]) || deepGet(payload, ["data","customer","customerEmail"]) || deepGet(payload, ["data","customer","customer_email"]) || deepGet(payload, ["customer","email"]) || deepGet(payload, ["customer","customerEmail"]) || deepGet(payload, ["customerEmail"]) || deepGet(payload, ["customer_email"]) || deepGet(payload, ["email"]);
+  if (explicit && !isLikelyNotificationAddress(explicit)) return String(explicit);
+  const customer = deepGet(payload, ["data","customer"]) || deepGet(payload, ["customer"]);
+  if (customer && typeof customer === "object") { for (const key of ["email","customerEmail","customer_email","emailAddress"]) { if (customer[key] && !isLikelyNotificationAddress(customer[key])) return String(customer[key]); } }
+  return null;
+}
+function extractCustomerPhone(payload) {
+  const explicit = deepGet(payload, ["data","customer","phone"]) || deepGet(payload, ["data","customer","customerPhone"]) || deepGet(payload, ["data","customer","phone_number"]) || deepGet(payload, ["customer","phone"]) || deepGet(payload, ["customerPhone"]) || deepGet(payload, ["customer_phone"]) || deepGet(payload, ["phone"]) || deepGet(payload, ["phone_number"]) || deepGet(payload, ["phoneNumber"]);
+  if (explicit) return String(explicit);
+  const customer = deepGet(payload, ["data","customer"]) || deepGet(payload, ["customer"]);
+  if (customer && typeof customer === "object") { for (const key of ["phone","customerPhone","customer_phone","phoneNumber","phone_number"]) { if (customer[key]) return String(customer[key]); } }
+  return null;
+}
+function isLikelyNotificationAddress(email) {
+  if (!email || typeof email !== "string") return false;
+  const lower = email.toLowerCase();
+  if (lower.match(/^(studio|notifications?|noreply|no-reply|info|admin|support|alerts?|leads?|inbound)/)) return true;
+  if (lower.includes("spinstream.xyz")) return true;
+  if (lower.includes("reachoutanswer.me")) return true;
+  return false;
+}
+function detectOwnerNotification(payload) {
+  const candidates = [deepGet(payload,["data","notificationEmail"]),deepGet(payload,["data","ownerEmail"]),deepGet(payload,["data","studioEmail"]),deepGet(payload,["notificationEmail"]),deepGet(payload,["ownerEmail"])].filter(Boolean);
+  for (const c of candidates) { if (isLikelyNotificationAddress(c)) return String(c); }
+  const allEmails = findAllEmails(payload);
+  for (const e of allEmails) { if (isLikelyNotificationAddress(e)) return e; }
+  return null;
+}
+function findAllEmails(obj) {
+  const emails = [];
+  function scan(val) { if (!val) return; if (typeof val === "string") { const m = val.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g); if (m) emails.push(...m); } else if (Array.isArray(val)) { for (const item of val) scan(item); } else if (typeof val === "object") { for (const v of Object.values(val)) scan(v); } }
+  scan(obj);
+  return [...new Set(emails)];
+}
+function normalizeReadsMusic(answer) {
+  const a = String(answer || "").toLowerCase().trim();
+  if (a.includes("yes") || a.includes("can read")) return "Yes";
+  if (a.includes("some") || a.includes("little") || a.includes("basic")) return "Some";
+  if (a.includes("no") || a.includes("cannot") || a.includes("can't")) return "No";
+  return "Unknown";
+}
+function normalizeHasPiano(answer) {
+  const a = String(answer || "").toLowerCase().trim();
+  if (a.includes("piano") && !a.includes("keyboard")) return "Piano";
+  if (a.includes("keyboard") && !a.includes("piano")) return "Keyboard";
+  if (a.includes("both")) return "Piano";
+  if (a.includes("neither") || a.includes("no") || a.includes("don't have") || a.includes("dont have")) return "Neither";
+  return "Unknown";
+}
+function normalizeMeetingMethod(answer) {
+  const a = String(answer || "").toLowerCase().trim();
+  if (a.includes("zoom")) return "Zoom";
+  if (a.includes("whatsapp")) return "WhatsApp";
+  if (a.includes("phone")) return "Phone";
+  if (a.includes("in person") || a.includes("in-person")) { if (a.includes("customer") || a.includes("their") || a.includes("your")) return "In person at customer's location"; if (a.includes("my") || a.includes("studio") || a.includes("teacher")) return "In person at my location"; return "In person at customer's location"; }
+  if (a.includes("remote") || a.includes("virtual") || a.includes("online")) return "Zoom";
+  if (a.includes("not decided") || a.includes("unsure") || a.includes("flexible")) return "Not decided";
+  return null;
+}
 function missingFields(lead) {
   if(isLesson(lead)){lead=normalizeLead(lead);return [["lessonTimes","preferred days / times"],["lessonFormat","online or in-person lesson preference"]].filter(([field])=>!lead[field]||lead[field]==="TBD").map(([,label])=>label);}
   const missing = [];
-  if (!lead.eventDate) missing.push("event date");
-  if (!lead.startTime) missing.push("start time");
-  if (!lead.endTime) missing.push("end time");
-  if (!lead.location) missing.push("location / venue");
+  if (isLessonInquiry(lead)) {
+    if (!lead.studentAge && !lead.guestAge) missing.push("student age");
+    if (!lead.studentExperience) missing.push("experience level");
+    if (!lead.readsMusic) missing.push("reads music status");
+    if (!lead.hasPiano) missing.push("has piano/keyboard");
+    if (!lead.preferredDays) missing.push("preferred days/times");
+    if (!lead.lessonDuration) missing.push("lesson duration");
+    if (!lead.meetingMethod) missing.push("meeting method");
+    if (!lead.customerEmail && !lead.email) missing.push("email");
+    if (!lead.customerPhone && !lead.phone) missing.push("phone");
+  } else {
+    if (!lead.eventDate) missing.push("event date");
+    if (!lead.startTime) missing.push("start time");
+    if (!lead.endTime) missing.push("end time");
+    if (!lead.location) missing.push("location / venue");
+    if (!lead.customerEmail && !lead.email) missing.push("email");
+    if (!lead.customerPhone && !lead.phone) missing.push("phone");
+  }
   return missing;
 }
 
-function makeResponse(lead) {
+function makeResponseLegacy(lead) {
   if (lead.recordType === "THUMBTACK_CONTACT_IMPORT") return "";
-  lead=normalizeLead(lead);
+  if (lead.responseDraft) return lead.responseDraft;
   const firstName = lead.firstName || firstWord(lead.name) || "there";
-  if(isLesson(lead)){
-    let text="Hi "+firstName+" — thanks for reaching out about "+(lead.lessonInstrument||"music")+" lessons.";
-    if(lead.lessonTimes)text+=" I noted your availability: "+lead.lessonTimes+".";
-    if(lead.lessonGoals)text+=" I saw your goals and would be glad to work through them with you.";
-    const missing=missingFields(lead);
-    if(missing.length)text+=" Could you confirm your "+missing.join(" and ")+"?";
-    else text+=" I will check my availability before confirming a first lesson.";
-    return text+"\n\nNick Laudani\n617-233-2008";
-  }
+  if (isLessonInquiry(lead)) return makeLessonResponse(lead, firstName);
   let text = "Hi " + firstName + " — thanks for reaching out";
   if (lead.requestType) { text += " about " + String(lead.requestType).toLowerCase(); }
   text += ".";
@@ -592,12 +784,32 @@ function makeResponse(lead) {
   if (lead.eventDate || lead.startTime || lead.endTime || lead.location) { text += "."; }
   if (lead.style) { text += " " + lead.style + " sounds like a good direction."; }
   if (lead.musicians) { text += " I saw you're considering " + lead.musicians + "."; }
+  if (lead.instrumentation) { text += " Instrumentation: " + lead.instrumentation + "."; }
   if (lead.message) { text += " I also saw your note about " + lead.message + "."; }
   if (!lead.calendarStatus || lead.calendarStatus === "UNKNOWN") { text += " I still need to confirm the requested time against my calendar before promising availability."; }
   const missing = missingFields(lead);
   if (missing.length) { text += " To keep this moving, could you also send me the " + missing.join(", ") + "?"; }
   else { text += " I have the basic event details and can put together the right setup and quote."; }
   text += "\n\nNick Laudani\n617-233-2008";
+  return text;
+}
+function makeLessonResponse(lead, firstName) {
+  let text = "Hi " + firstName + " — thanks for your interest in piano lessons!\n\n";
+  if (lead.studentAge || lead.guestAge) { text += "I see you're looking for lessons for someone aged " + (lead.studentAge || lead.guestAge) + ". "; }
+  if (lead.studentExperience) { text += "Your current experience: " + lead.studentExperience + ". "; }
+  if (lead.readsMusic && lead.readsMusic !== "Unknown") { text += "Reading music: " + lead.readsMusic + ". "; }
+  if (lead.hasPiano && lead.hasPiano !== "Unknown") { text += "Instrument: " + lead.hasPiano + ". "; }
+  text = text.trim() + "\n\n";
+  if (lead.regularPrice) { text += "My rate is " + lead.regularPrice + " per lesson. "; }
+  if (lead.introOffer) { text += "I offer an introductory lesson" + (lead.introPrice ? " at " + lead.introPrice : "") + (lead.introDuration ? " (" + lead.introDuration + ")" : "") + ". "; }
+  text = text.trim() + "\n\n";
+  const questions = [];
+  if (!lead.preferredDays) questions.push("- What days and times work best for you?");
+  if (!lead.meetingMethod) questions.push("- Would you prefer in-person or remote (Zoom) lessons?");
+  if (!lead.studentGoals) questions.push("- What are your goals — what would you like to learn or improve?");
+  if (lead.teacherRecommends) questions.push("- You mentioned a style preference — I can tailor lessons to that.");
+  if (questions.length) { text += "A few quick questions to get started:\n" + questions.join("\n") + "\n\n"; }
+  text += "Looking forward to hearing from you!\n\nNick Laudani\n617-233-2008";
   return text;
 }
 
@@ -665,3 +877,205 @@ function apiJson(data, status = 200) {
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...corsHeaders() } });
 }
+
+
+// ---- RA-20261028-02 field fixes, conversation threading and reply drafts ----
+
+function extractFields(payload) {
+  const f = extractFieldsLegacy(payload);
+  const type = String(deepGet(payload, ["event", "eventType"]) || "");
+  const isMsg = /^MessageCreated/i.test(type);
+  if (f.eventType && (f.eventType === type || isWebhookLabel(f.eventType))) f.eventType = null;
+  const c = deepGet(payload, ["data", "customer"]) || {};
+  const first = c.firstName || c.first_name || null;
+  const last = c.lastName || c.last_name || null;
+  const custName = [first, last].filter(Boolean).join(" ") || c.displayName || null;
+  if (custName) { f.name = String(custName); f.firstName = first ? String(first) : firstWord(custName); }
+  const category = deepGet(payload, ["data", "request", "category", "name"]);
+  f.requestType = category || deepFind(payload, ["service_name", "serviceName", "job_type", "jobType"]) || null;
+  if (isMsg) {
+    f.message = null;
+  } else {
+    const desc = deepGet(payload, ["data", "request", "description"]);
+    if (desc) f.message = String(desc);
+  }
+  const loc = deepGet(payload, ["data", "request", "location"]);
+  if (loc && typeof loc === "object") {
+    const cityLine = [loc.city, [loc.state, loc.zipCode].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+    if (cityLine) f.location = cityLine;
+    const street = [loc.address1, loc.address2].filter(Boolean).join(" ");
+    if (street) f.address = [street, cityLine].filter(Boolean).join(", ");
+    if (loc.zipCode) f.zip = String(loc.zipCode);
+  }
+  const details = deepGet(payload, ["data", "request", "details"]);
+  if (Array.isArray(details)) {
+    f.details = details.filter(x => x && x.question).slice(0, 60).map(x => ({ question: String(x.question).slice(0, 200), answer: answerText(x.answer ?? x.answers).slice(0, 2000) }));
+    const lesson = isLesson(f);
+    for (const item of f.details) {
+      const q = item.question.toLowerCase().trim(), a = item.answer;
+      if (!a) continue;
+      if (q === "student age") { f.studentAge = a; f.guestAge = null; }
+      else if (/age of guests|guest age/.test(q)) { f.guestAge = a; if (!lesson) f.studentAge = null; }
+      if (/instrument (type|access)/.test(q)) { f.instrumentAtHome = a; f.hasPiano = normalizeHasPiano(a); }
+      if (q === "lesson length") f.lessonDuration = a;
+      if (/student experience|experience level/.test(q)) f.studentExperience = a;
+      if (q === "scheduling") { f.schedulingNote = a; if (lesson) f.preferredDays = a; }
+      if (/travel pref/.test(q)) { f.travelOptions = a; f.meetingMethod = summarizeTravel(a); }
+      if (/travel range/.test(q)) f.travelRange = a;
+      if (/music(al)? (style|types?|genres?)/.test(q)) { f.style = a; f.genres = a; }
+      if (/instruments wanted/.test(q)) f.instrumentation = a;
+      if (q === "venue") f.venue = a;
+      if (/musicians needed/.test(q)) f.musicians = a;
+      if (q === "category") f.subcategory = a;
+      if (/anything else/.test(q)) f.instructions = a;
+      if (/^budget/.test(q)) f.budget = a;
+      if (q === "event type") f.eventType = a;
+      if (q === "number of guests") f.guestCount = a;
+    }
+  }
+  return normalizeLead({...f,sourceRequest:payload});
+}
+
+function isWebhookLabel(v) { return /^[A-Za-z]+(Created|Updated|Deleted)V\d+$/.test(String(v || "")); }
+
+function summarizeTravel(answer) {
+  const a = String(answer || "").toLowerCase();
+  const opts = [];
+  if (a.includes("pro's location") || a.includes("pro’s location")) opts.push("at my location");
+  if (a.includes("my home") || a.includes("customer")) opts.push("at your place");
+  if (a.includes("remote") || a.includes("online") || a.includes("phone or internet")) opts.push("online");
+  if (!opts.length) return normalizeMeetingMethod(answer);
+  return opts.length === 1 ? "In person " + opts[0] : "Flexible: " + opts.join(", ");
+}
+
+async function resolveLeadId(env, negotiationId, legacyId) {
+  if (!negotiationId) return legacyId;
+  const mapKey = "negotiation:" + safeId(String(negotiationId));
+  const mapped = await env.REACHOUT_LEADS.get(mapKey);
+  if (mapped && await env.REACHOUT_LEADS.get("lead:" + mapped)) return mapped;
+  const legacy = legacyId ? await readJSON(env.REACHOUT_LEADS, "lead:" + legacyId) : null;
+  const id = legacy && String(legacy.negotiationId || "") === String(negotiationId) ? legacyId : "thumbtack-neg-" + safeId(String(negotiationId));
+  await env.REACHOUT_LEADS.put(mapKey, id);
+  return id;
+}
+
+function applyThumbtackEvent(lead, payload, fields, now) {
+  const type = String(deepGet(payload, ["event", "eventType"]) || "");
+  const isMsg = /^MessageCreated/i.test(type);
+  if (!isMsg || !lead.latestRaw) lead.latestRaw = payload;
+  if (isMsg) {
+    const d = deepGet(payload, ["data"]) || {};
+    lead.conversation = Array.isArray(lead.conversation) ? lead.conversation : [];
+    const messageID = d.messageID ? String(d.messageID) : null;
+    if (!messageID || !lead.conversation.some(m => m.messageID === messageID)) {
+      lead.conversation.push({ messageID, from: d.from ? String(d.from) : null, text: d.text ? String(d.text).slice(0, 4000) : null, sentAt: d.sentAt ? String(d.sentAt) : now });
+      lead.conversation.sort((a, b) => String(a.sentAt).localeCompare(String(b.sentAt)));
+      if (lead.conversation.length > 200) lead.conversation = lead.conversation.slice(-200);
+    }
+    if (String(d.from || "").toLowerCase() === "customer" && d.text) { lead.lastCustomerMessage = String(d.text).slice(0, 4000); lead.lastCustomerMessageAt = d.sentAt ? String(d.sentAt) : now; }
+  }
+  for (const k of ["details", "address", "zip", "travelRange", "venue", "instrumentAtHome", "schedulingNote", "subcategory"]) {
+    if (fields[k]) lead[k] = fields[k];
+  }
+}
+
+// ---- reply drafts ----
+const PIANO_RATES = { 30: 45, 45: 60, 60: 80 };
+const PIANO_INTRO_PRICE = 25;
+const LIVE_FIRST_HOUR = 250;
+const LIVE_PER_HOUR_PER_MUSICIAN = 100;
+const LIVE_GAS_FEE = 50;
+const LESSON_WORDS = ["piano", "lesson", "teacher", "student", "instruction", "tutor"];
+const LIVE_WORDS = ["live music", "band", "wedding", "party", "event", "gig", "ceremony", "cocktail", "reception", "performance", "entertainment", "musician", "pianist", "jazz", "duo", "trio", "singer", "concert", "celebration", "corporate"];
+
+function inquiryKind(lead) {
+  const code=serviceCode(lead);
+  return isLesson(lead)?"lesson":code==="LIVE_MUSIC"?"live":"generic";
+}
+
+function joinList(items) {
+  if (items.length <= 1) return items.join("");
+  return items.slice(0, -1).join(", ") + ", and " + items[items.length - 1];
+}
+function lowerFirst(s) { s = String(s || "").trim(); return s ? s.charAt(0).toLowerCase() + s.slice(1) : s; }
+function lessonMinutes(text) { const m = String(text || "").match(/(\d{2,3})\s*min/i); if (m) return Number(m[1]); if (/1\s*hour|one hour|60/i.test(String(text || ""))) return 60; return null; }
+function clockMinutes(t) {
+  const m = String(t || "").match(/(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m/i);
+  if (!m) return null;
+  let h = Number(m[1]) % 12; if (m[3].toLowerCase() === "p") h += 12;
+  return h * 60 + Number(m[2] || 0);
+}
+function musicianCount(text) {
+  const t = String(text || "").toLowerCase();
+  if (!t) return null;
+  if (/solo|just one|\bone\b|^1\b/.test(t)) return 1;
+  if (/duo|\btwo\b/.test(t)) return 2;
+  if (/trio|\bthree\b/.test(t)) return 3;
+  if (/quartet|\bfour\b/.test(t)) return 4;
+  const d = t.match(/\d+/);
+  return d ? Number(d[0]) : null;
+}
+function prettyDate(iso) {
+  const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return iso ? String(iso) : null;
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return months[Number(m[2]) - 1] + " " + Number(m[3]);
+}
+function cityOnly(loc) { return loc ? String(loc).split(",")[0].trim() : null; }
+
+function makeResponse(lead) {
+  if (lead.recordType === "THUMBTACK_CONTACT_IMPORT") return "";
+  if (lead.responseDraft) return lead.responseDraft;
+  const firstName = lead.firstName || firstWord(lead.name) || "there";
+  const kind = inquiryKind(lead);
+  const paras = ["Hi " + firstName + ", thanks so much for reaching out, and for picking me! Hopefully I was your first choice, but either way, this sounds like a great fit."];
+  let hasEstimate = false;
+  if (kind === "lesson") { paras.push(lessonParagraph(lead)); hasEstimate = true; }
+  else if (kind === "live") { paras.push(liveParagraph(lead)); hasEstimate = true; }
+  let close = "I just want to make sure I've got the right email and phone number for you, so send those my way when you get a chance. Then we can hop on a quick call or keep texting, whatever's easier.";
+  if (!hasEstimate) close += " I'll follow up with a quick estimate if you'd like to get started.";
+  paras.push(close);
+  return paras.filter(Boolean).join("\n\n") + "\n\nNick Laudani";
+}
+
+function lessonParagraph(lead) {
+  lead=normalizeLead(lead);
+  const bits = [];
+  const mins = lessonMinutes(lead.lessonLength);
+  const days = lead.lessonTimes ? lowerFirst(lead.lessonTimes) : null;
+  if (mins) bits.push("you're looking for " + mins + "-minute lessons" + (days ? " on " + days : ""));
+  else if (days) bits.push("you're thinking " + days);
+  if (lead.hasPiano === "Piano") bits.push("you've got a piano at home");
+  else if (lead.hasPiano === "Keyboard") bits.push("you've got a keyboard at home");
+  let text = bits.length ? "From what you shared, " + joinList(bits) + "." : "";
+  if (/no formal|never|beginner|none/i.test(String(lead.studentExperience || ""))) text += (text ? " " : "") + "Starting with no formal training is a great place to begin.";
+  const price = mins && PIANO_RATES[mins] ? "Lessons are $" + PIANO_RATES[mins] + " for " + mins + " minutes." : "My rate is $80 an hour ($60 for 45 minutes, $45 for 30 minutes).";
+  text += (text ? " " : "") + price + " I usually start with an intro meet-and-teach session for $" + PIANO_INTRO_PRICE + " to see if we're a good fit, and after that we can create a schedule and a program that fits you.";
+  return text;
+}
+
+function liveParagraph(lead) {
+  const ev = lead.eventType && !isWebhookLabel(lead.eventType) ? lowerFirst(lead.eventType) : null;
+  const what = ev ? (/^[aeiou]/i.test(ev) ? "an " : "a ") + ev : "an event";
+  const date = prettyDate(lead.eventDate);
+  const times = lead.startTime && lead.endTime ? lead.startTime + " to " + lead.endTime : null;
+  const city = cityOnly(lead.location);
+  let text = (ev || date || times || city) ? "From what you shared, you're planning " + what + (date ? " on " + date : "") + (times ? ", " + times : "") + (city ? ", in " + city : "") + "." : "";
+  if (date) text += " Let me double-check my calendar for that date.";
+  text = text.trim();
+  const sep = () => (text ? " " : "");
+  const start = clockMinutes(lead.startTime), end = clockMinutes(lead.endTime);
+  let hours = null;
+  if (start !== null && end !== null) { let span = end - start; if (span <= 0) span += 1440; hours = Math.round(span / 30) / 2; }
+  const n = musicianCount(lead.musicians || lead.musicianCount);
+  if (hours && hours >= 1 && hours <= 12 && n && n >= 1 && n <= 10) {
+    const total = LIVE_FIRST_HOUR + Math.max(0, hours - 1) * LIVE_PER_HOUR_PER_MUSICIAN * n;
+    const who = n === 1 ? "just me" : n === 2 ? "a duo" : n === 3 ? "a trio" : n + " musicians";
+    text += sep() + "For a rough estimate, " + hours + " hours with " + who + " comes to about $" + Math.round(total).toLocaleString("en-US") + ", including travel and setup. I'll firm that up once we nail down the details.";
+  } else {
+    text += sep() + "My rate starts at $" + LIVE_FIRST_HOUR + " for the first hour, which covers travel, setup, and the first hour of music, then $" + LIVE_PER_HOUR_PER_MUSICIAN + " per hour per musician after that. I'll put together a more exact estimate once we nail down the details.";
+  }
+  return text + " If the drive is more than an hour each way, I add a $" + LIVE_GAS_FEE + " gas fee.";
+}
+
+export { LEGACY_FIELD_MAP, extractFields, makeResponse, missingFields, isLessonInquiry, leadSummary, normalizeMeetingMethod, normalizeReadsMusic, normalizeHasPiano, isLikelyNotificationAddress, extractCustomerEmail, extractCustomerPhone, checkAuth };

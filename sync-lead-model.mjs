@@ -1,4 +1,4 @@
-// Keep the manually deployed Worker self-contained. Run after editing lead-model.mjs.
+// Embed the shared mapper in the manually deployed Worker (thumbtack.mjs remains a separate module). Run after editing lead-model.mjs.
 import fs from 'node:fs';
 const path=new URL('./workers/reachout-respond.mjs',import.meta.url);
 const start='// BEGIN SHARED LEAD MODEL',end='// END SHARED LEAD MODEL';
