@@ -1,3 +1,4 @@
+import {normalizeLead,serviceCode,workspaceFor,isLesson,LESSON_FIELDS,DETAIL_FIELDS,requestDetails,answerText} from './lead-model.mjs?v=20261030-lessons1';
 const API='https://reachout-respond.cptnspacetime.workers.dev';
 const TOKEN_KEY='REACHOUT_ADMIN_TOKEN';
 const TOKEN_EXPIRY_KEY='REACHOUT_ADMIN_TOKEN_EXPIRES';
@@ -17,7 +18,7 @@ function apiHeaders(extra={}){const t=adminToken();return {...extra,...(t?{Autho
 async function apiFetch(url,opts={}){
   opts={...opts,headers:apiHeaders(opts.headers||{})};
   return fetch(url,opts);
-}const f=document.querySelector('#fastLead'),out=document.querySelector('#fastAnswer'),badge=document.querySelector('#availBadge'),missingBox=document.querySelector('#missing');let availability='UNKNOWN',activeHub='ALL',activeQueue='ACTIVE',backendSupportsArchive=false,workerContractChecked=false,activeArchivedContact=false,allLeads=[],activeLeadId=null,activeReplyTo='',activeDirectEmail='',activeReplyMode='';
+}const f=document.querySelector('#fastLead'),out=document.querySelector('#fastAnswer'),badge=document.querySelector('#availBadge'),missingBox=document.querySelector('#missing');let availability='UNKNOWN',activeHub='ALL',activeQueue='ACTIVE',backendSupportsArchive=false,workerContractChecked=false,backendSupportsLessons=false,activeArchivedContact=false,allLeads=[],activeLeadId=null,activeReplyTo='',activeDirectEmail='',activeReplyMode='';
 function setAuthButtons(unlocked){
   const unlock=document.querySelector('#unlockInbox'),lock=document.querySelector('#lockInbox');
   if(unlock) unlock.hidden=unlocked;
@@ -32,7 +33,7 @@ document.querySelector('#ownerAccessForm').addEventListener('submit',async event
 document.querySelector('#cancelOwnerAccess').onclick=()=>{document.querySelector('#ownerAccessForm').reset();document.querySelector('#ownerAccessDialog').close();};
 function lockInbox(){
   localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(TOKEN_EXPIRY_KEY);
-  allLeads=[]; activeLeadId=null; loadedLeadId=null; activeArchivedContact=false; f.reset();out.value='';document.querySelector('#contactHistoryPanel').hidden=true;document.querySelector('#documentPreview').classList.add('hidden');
+  allLeads=[]; activeLeadId=null; loadedLeadId=null; activeArchivedContact=false; f.reset();out.value='';document.querySelector('#contactHistoryPanel').hidden=true;document.querySelector('#sourceDetails').hidden=true;document.querySelector('#sourceDetailsRows').textContent='';document.querySelector('#documentPreview').classList.add('hidden');
   setAuthButtons(false);
   setSecurityStatus('LEAD API PROTECTED · Private inbox locked.');
   const list=document.querySelector('#sourceLeadList');
@@ -50,19 +51,11 @@ function lockInbox(){
 function inferSource(L={}){
   return canonicalSource(L.source||L.leadSource||L.lead_source||L.channel||L.origin||L.sourceName||'');
 }
-function inferWorkspace(L={}){
-  const explicit=String(L.workspace||L.workspaceName||L.business||'').toLowerCase();
-  if(explicit.includes('rent')||explicit.includes('furnish'))return 'Rentals';
-  if(explicit.includes('spin')||explicit.includes('nfartifact'))return 'SpinStream / NFArtifact';
-  if(explicit.includes('music')||explicit.includes('lesson'))return 'Live Music';
-  const hay=[L.requestType,L.serviceName,L.service_name,L.message,L.customerMessage,L.subject,inferSource(L)].filter(Boolean).join(' ').toLowerCase();
-  if(/furnish|rental|tenant|housing|lease|studio|apartment/.test(hay))return 'Rentals';
-  if(/spinstream|nfartifact|ain-|spin-|proof|dossier|mint/.test(hay))return 'SpinStream / NFArtifact';
-  if(/music|wedding|cocktail|party|piano|lesson|band|musician|event/.test(hay))return 'Live Music';
-  return 'All';
-}
+function inferWorkspace(L={}){return workspaceFor(L);}
 function leadMatchesHub(L,hub){
   if(hub==='ALL')return true;
+  if(hub==='LESSONS')return isLesson(L);
+  if(hub==='LIVE MUSIC')return serviceCode(L)==='LIVE_MUSIC';
   if(hub==='SPINSTREAM / NFARTIFACT')return inferWorkspace(L)==='SpinStream / NFArtifact';
   if(hub==='FURNISHED FINDER')return inferSource(L)==='Furnished Finder'||inferWorkspace(L)==='Rentals';
   return inferSource(L).toUpperCase()===hub;
@@ -96,7 +89,7 @@ function applyLeadContext(L){
   if(s&&[...s.options].some(o=>o.value===source))s.value=source;
   syncContextLabels(); toggleLeadMode();
 }
-async function loadLeads(){const list=document.querySelector('#sourceLeadList');if(!adminToken()){setAuthButtons(false);setSecurityStatus('LEAD API PROTECTED · Private inbox locked.');list.innerHTML='<p class="muted">Inbox locked. Click Unlock inbox to enter your private token.</p>';return;}setSecurityStatus('LEAD API PROTECTED · Checking private access…');list.innerHTML='<p class="muted">Loading live leads…</p>';const requestedQueue=activeQueue;try{if(!workerContractChecked){const health=await apiFetch(API+'/health',{cache:'no-store'}),contract=await health.json();backendSupportsArchive=contract.csvImport==='/api/admin/import-thumbtack';workerContractChecked=true;}const r=await apiFetch(API+'/api/leads'+(backendSupportsArchive?'?archived='+(activeQueue==='ARCHIVE'?'1':'0'):''),{cache:'no-store'}),d=await r.json();if(requestedQueue!==activeQueue||!adminToken())return;if(!r.ok){if(r.status===401){localStorage.removeItem(TOKEN_KEY);localStorage.removeItem(TOKEN_EXPIRY_KEY);sessionStorage.removeItem(TOKEN_KEY);allLeads=[];setAuthButtons(false);setSecurityStatus('PRIVATE INBOX LOCKED · Token not accepted.');}throw new Error(r.status===401?'Unauthorized — click Unlock inbox and enter the current raw admin token.':(d.error||'API error'))}allLeads=d.leads||[];document.querySelector('#activeQueueCount').textContent=d.activeCount??allLeads.filter(x=>!x.archived).length;document.querySelector('#archiveQueueCount').textContent=d.archiveCount??allLeads.filter(x=>x.archived).length;setAuthButtons(true);setSecurityStatus('PRIVATE INBOX CONNECTED · Lead API authenticated.');renderHub()}catch(e){list.innerHTML='<p class="api-error">Could not load ReachOut inbox: '+esc(e.message)+'</p>'}}function renderHub(){
+async function loadLeads(){const list=document.querySelector('#sourceLeadList');if(!adminToken()){setAuthButtons(false);setSecurityStatus('LEAD API PROTECTED · Private inbox locked.');list.innerHTML='<p class="muted">Inbox locked. Click Unlock inbox to enter your private token.</p>';return;}setSecurityStatus('LEAD API PROTECTED · Checking private access…');list.innerHTML='<p class="muted">Loading live leads…</p>';const requestedQueue=activeQueue;try{if(!workerContractChecked){const health=await apiFetch(API+'/health',{cache:'no-store'}),contract=await health.json();backendSupportsArchive=contract.csvImport==='/api/admin/import-thumbtack';backendSupportsLessons=contract.lessonFieldsVersion===1;workerContractChecked=true;}const r=await apiFetch(API+'/api/leads'+(backendSupportsArchive?'?archived='+(activeQueue==='ARCHIVE'?'1':'0'):''),{cache:'no-store'}),d=await r.json();if(requestedQueue!==activeQueue||!adminToken())return;if(!r.ok){if(r.status===401){localStorage.removeItem(TOKEN_KEY);localStorage.removeItem(TOKEN_EXPIRY_KEY);sessionStorage.removeItem(TOKEN_KEY);allLeads=[];setAuthButtons(false);setSecurityStatus('PRIVATE INBOX LOCKED · Token not accepted.');}throw new Error(r.status===401?'Unauthorized — click Unlock inbox and enter the current raw admin token.':(d.error||'API error'))}allLeads=d.leads||[];document.querySelector('#activeQueueCount').textContent=d.activeCount??allLeads.filter(x=>!x.archived).length;document.querySelector('#archiveQueueCount').textContent=d.archiveCount??allLeads.filter(x=>x.archived).length;setAuthButtons(true);setSecurityStatus('PRIVATE INBOX CONNECTED · Lead API authenticated.');renderHub()}catch(e){list.innerHTML='<p class="api-error">Could not load ReachOut inbox: '+esc(e.message)+'</p>'}}function renderHub(){
   const rows=allLeads.filter(x=>(x.archived===true)===(activeQueue==='ARCHIVE')&&leadMatchesHub(x,activeHub));
   const archived=allLeads.filter(x=>x.archived);const withEmail=archived.filter(x=>x.email).length;document.querySelector('#archiveToolbar').hidden=activeQueue!=='ARCHIVE';document.querySelector('#archiveCoverage').textContent=backendSupportsArchive?archived.length+' archived contacts · '+withEmail+' with email. Save an email on any contact to make it available here.':'The archive worker update is needed before contacts can be imported.';
   document.querySelector('#hubTitle').textContent=(activeQueue==='ARCHIVE'?'Archive':'Active inbox')+(activeHub==='ALL'?'':' · '+activeHub);
@@ -110,10 +103,11 @@ async function loadLeads(){const list=document.querySelector('#sourceLeadList');
 let loadedLeadId=null;
 async function openLead(id){
   loadedLeadId=null;
+  document.querySelector('#sourceDetails').hidden=true;
   activeLeadId=id; renderHub();
   const r=await apiFetch(API+'/api/leads/'+encodeURIComponent(id),{cache:'no-store'}),d=await r.json(); if(!r.ok)return;
   if(activeLeadId!==id)return;
-  const L=d.lead||{};
+  const L=normalizeLead(d.lead||{});
   activeArchivedContact=L.archived===true;
   f.reset();
   document.querySelector('#documentPreview').classList.add('hidden');
@@ -137,6 +131,8 @@ async function openLead(id){
   setField('rentalCall',L.rentalCall||L.wantsCall||'TBD'); setField('ffReplyTo',activeReplyTo); setField('directEmail',activeDirectEmail); setField('rentalReplyFocus',L.rentalReplyFocus||'Auto-detect'); setField('rentalQuestions',L.rentalQuestions||L.questions||'');
   setField('spinTopic',L.spinTopic||L.topic||'TBD'); setField('spinAIN',L.ain||L.AIN||''); setField('spinMintId',L.mintId||L.mint_id||'');
   setField('spinTier',L.tier||L.productTier||''); setField('spinQuestion',L.spinQuestion||L.question||'');
+  for(const field of DETAIL_FIELDS){if(f.elements[field]?.tagName==='SELECT')setSelect(field,L[field]);else setField(field,L[field]??'');}
+  renderSourceDetails(L);
   availability=L.calendarStatus||'UNKNOWN'; setAvailability(availability); out.value=L.suggestedResponse||'';
   missingBox.innerHTML=(L.missing&&L.missing.length)?'<b>Still useful to ask:</b> '+L.missing.map(esc).join(' · '):'<b>Lead loaded. Review only what this customer actually needs.</b>';
   applyLeadContext(L);
@@ -235,6 +231,7 @@ function buildRentalQuickAnswer(d){
     if(d.offerCall==='Yes')s+=' If a call would be easier, send me a couple of times that work.';
     s+='\n\nNick Laudani'; out.value=s; missingBox.innerHTML='<b>SpinStream workflow:</b> identify the record, tier and exact question before answering'; return;
   }
+  if(lessonMode()){document.querySelector('#buildLessonAnswer').click();return;}
   const miss=[]; if(!d.date)miss.push('date'); if(!d.location)miss.push('location / venue'); if(!d.start||!d.end)miss.push('event start / end time'); if(d.musicians==='Not sure')miss.push('musician setup');
   missingBox.innerHTML=miss.length?'<b>Still useful to ask:</b> '+miss.join(' · '):'<b>Core event details present.</b>';
   let s='Hi '+(d.name||'there')+' — thanks for reaching out about your '+d.request.toLowerCase()+'.';
@@ -252,18 +249,24 @@ function buildRentalQuickAnswer(d){
 };
 function leadChanges(){
   const d=v();
-  return {...(backendSupportsArchive?{name:d.name,email:d.email,phone:d.phone,requestType:d.request}:{}),calendarStatus:normalizeAvail(availability),eventDate:d.date,startTime:d.start,endTime:d.end,location:d.location,musicians:d.musicians,style:d.style,message:d.message,budget:d.budget,guestCount:d.guestCount,eventType:d.eventType,fee:d.fee||null,deposit:d.deposit||null,notes:d.notes};
+  return {...(backendSupportsLessons?Object.fromEntries(DETAIL_FIELDS.filter(key=>key in d).map(key=>[key,d[key]??''])):{}),...(backendSupportsLessons?{serviceCode:serviceCode({requestType:d.request}),workspace:selectedWorkspace()}:{}),...(backendSupportsArchive?{name:d.name,email:d.email,phone:d.phone,requestType:d.request}:{}),calendarStatus:normalizeAvail(availability),eventDate:d.date,startTime:d.start,endTime:d.end,location:d.location,musicians:d.musicians,style:d.style,message:d.message,budget:d.budget,guestCount:d.guestCount,eventType:d.eventType,fee:d.fee||null,deposit:d.deposit||null,notes:d.notes};
 }
 async function saveLead(markWaiting=false){
   const button=document.querySelector(markWaiting?'#markSent':'#saveLead');
   if(!activeLeadId){button.textContent='No lead selected';return}
   if(loadedLeadId!==activeLeadId){button.textContent='Load lead before saving';return}
-  const changes=leadChanges(); if(markWaiting)changes.status='WAITING';
+  if(lessonMode()&&!backendSupportsLessons){button.textContent='Lesson saving needs Worker update';missingBox.textContent='These lesson fields are not saved yet. The server needs the lesson-field update before Save lead can retain them.';return;}
+  const savingId=activeLeadId,changes=leadChanges(); if(markWaiting)changes.status='WAITING';
   try{
-    const r=await apiFetch(API+'/api/leads/'+encodeURIComponent(activeLeadId),{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(changes)});
-    button.textContent=r.ok?(markWaiting?'Marked waiting':'Lead saved'):'Update failed';
-    if(r.ok)await loadLeads();
-  }catch{button.textContent='Update failed'}
+    const r=await apiFetch(API+'/api/leads/'+encodeURIComponent(savingId),{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(changes)});
+    if(!r.ok)throw new Error('Update failed');
+    const verify=await apiFetch(API+'/api/leads/'+encodeURIComponent(savingId),{cache:'no-store'});
+    const saved=(await verify.json()).lead;
+    if(!verify.ok||!saved||Object.entries(changes).some(([key,value])=>String(saved[key]??'')!==String(value??'')))throw new Error('Some fields were not saved');
+    if(activeLeadId!==savingId)return;
+    button.textContent=markWaiting?'Marked waiting':'Lead saved and verified';
+    await loadLeads();
+  }catch(error){if(activeLeadId!==savingId)return;button.textContent='Save not verified';missingBox.textContent=error.message+' — keep this form open; your changes have not been confirmed.';}
 }
 document.querySelector('#copyFast').onclick=async()=>{await navigator.clipboard.writeText(out.value);document.querySelector('#copyFast').textContent='Copied'};
 document.querySelector('#markSent').onclick=()=>saveLead(true);
@@ -324,6 +327,9 @@ function spinMode(){const req=String(f.elements.request?.value||'').toLowerCase(
 function toggleLeadMode(){
   const rental=rentalMode(),spin=spinMode(),lesson=!rental&&!spin&&lessonMode(),event=!rental&&!spin&&!lesson;
   document.querySelector('#eventRequestFields')?.classList.toggle('hidden',rental||spin);
+  for(const name of ['date','start','end','guestCount','guestAge','musicians','musicType','style','location'])f.elements[name]?.closest('label')?.classList.toggle('hidden',lesson);
+  for(const selector of ['.send-panel','.calendar-model'])document.querySelector(selector)?.classList.toggle('hidden',lesson);
+  document.querySelector('#lessonHeading').textContent=serviceCode({requestType:f.elements.request.value})==='PIANO_LESSON'?'Piano lesson details':'Music lesson details';
   document.querySelector('#rentalSheet')?.classList.toggle('hidden',!rental);
   document.querySelector('#spinSheet')?.classList.toggle('hidden',!spin);
   document.querySelector('#lessonSheet')?.classList.toggle('hidden',!lesson);
@@ -332,11 +338,11 @@ function toggleLeadMode(){
   document.querySelector('.quote-actions')?.classList.toggle('hidden',!event);
   syncContextLabels();
 }
-f.elements.request?.addEventListener('change',toggleLeadMode);
-document.querySelector('#workspace')?.addEventListener('change',toggleLeadMode);
+f.elements.request?.addEventListener('change',()=>{document.querySelector('#workspace').value=workspaceFor({requestType:f.elements.request.value,source:selectedSource()});toggleLeadMode();});
+document.querySelector('#workspace')?.addEventListener('change',()=>{const w=selectedWorkspace();if(w==='Piano Lessons')setSelect('request','Piano Lesson');else if(w==='Music Lessons')setSelect('request','Music Lesson');else if(w==='Live Music'&&lessonMode())setSelect('request','Live Music');toggleLeadMode();});
 document.querySelector('#source')?.addEventListener('change',e=>{if(e.target.value==='Furnished Finder')document.querySelector('#workspace').value='Rentals';toggleLeadMode()});
 toggleLeadMode();
-document.querySelector('#buildLessonAnswer').onclick=()=>{const d=v(),name=d.name||'there';let s='Hi '+name+' — thanks for reaching out about lessons. I’d be glad to learn a little about what you want to work on and see what kind of lesson setup makes the most sense.';if(d.lessonInstrument)s+=' I saw that you are interested in '+d.lessonInstrument+' lessons.';if(d.lessonFormat&&d.lessonFormat!=='TBD')s+=' '+d.lessonFormat+' can work as the lesson format.';if(d.lessonFrequency&&d.lessonFrequency!=='TBD')s+=' You indicated '+d.lessonFrequency.toLowerCase()+'.';if(d.studentLevel&&d.studentLevel!=='TBD')s+=' Your '+d.studentLevel.toLowerCase()+' level is helpful to know.';if(d.lessonGoals)s+=' I also saw that you would like to work on '+d.lessonGoals+'.';const missing=[];if(!d.lessonTimes||d.lessonTimes==='TBD')missing.push('days/times that work best');if(!d.lessonFormat||d.lessonFormat==='TBD')missing.push('whether you prefer in-person or online');if(missing.length)s+=' To figure out a good first lesson, let me know '+missing.join(' and ')+'.';else s+=' I can use those details to work out a good first lesson time.';s+='\n\nNick Laudani\n617-233-2008';out.value=s;missingBox.innerHTML='<b>Lesson workflow:</b> availability and first-lesson scheduling';out.scrollIntoView({behavior:'smooth'})};
+document.querySelector('#buildLessonAnswer').onclick=()=>{const d=v(),name=d.name||'there';let s='Hi '+name+' — thanks for reaching out about lessons. I’d be glad to learn a little about what you want to work on and see what kind of lesson setup makes the most sense.';if(d.lessonInstrument)s+=' I saw that you are interested in '+d.lessonInstrument+' lessons.';if(d.lessonFormat&&d.lessonFormat!=='TBD')s+=' I noted your requested format: '+d.lessonFormat+'.';if(d.lessonFrequency&&d.lessonFrequency!=='TBD')s+=' You indicated '+d.lessonFrequency.toLowerCase()+'.';if(d.studentLevel&&d.studentLevel!=='TBD')s+=' Your '+d.studentLevel.toLowerCase()+' level is helpful to know.';if(d.lessonGoals)s+=' I also saw that you would like to work on '+d.lessonGoals+'.';const missing=[];if(!d.lessonTimes||d.lessonTimes==='TBD')missing.push('days/times that work best');if(!d.lessonFormat||d.lessonFormat==='TBD')missing.push('whether you prefer in-person or online');if(missing.length)s+=' To figure out a good first lesson, let me know '+missing.join(' and ')+'.';else s+=' I can use those details to work out a good first lesson time.';s+='\n\nNick Laudani\n617-233-2008';out.value=s;missingBox.innerHTML='<b>Lesson workflow:</b> availability and first-lesson scheduling';out.scrollIntoView({behavior:'smooth'})};
 
 function proposalTextLines(){const d=v(),a=proposalChoice('a'),b=proposalChoice('b');return[
 'Nicholas Laudani — Live Music',
@@ -394,7 +400,7 @@ function renderContactHistory(L){
 ['email','phone','name'].forEach(name=>f.elements[name].addEventListener('input',updateArchiveContactLinks));out.addEventListener('input',updateArchiveContactLinks);
 document.querySelectorAll('[data-queue]').forEach(button=>button.addEventListener('click',()=>{
   activeQueue=button.dataset.queue;activeLeadId=null;loadedLeadId=null;activeArchivedContact=false;
-  f.reset();out.value='';document.querySelector('#contactHistoryPanel').hidden=true;document.querySelector('#documentPreview').classList.add('hidden');
+  f.reset();out.value='';document.querySelector('#contactHistoryPanel').hidden=true;document.querySelector('#sourceDetails').hidden=true;document.querySelector('#sourceDetailsRows').textContent='';document.querySelector('#documentPreview').classList.add('hidden');
   document.querySelectorAll('[data-queue]').forEach(item=>item.classList.toggle('active',item===button));loadLeads();
 }));
 document.querySelector('#refreshArchive').onclick=()=>{workerContractChecked=false;loadLeads();};
@@ -407,3 +413,15 @@ document.querySelector('#exportArchiveEmails').onclick=()=>{
   link.href=url;link.download='reachout-archive-email-contacts.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   document.querySelector('#archiveExportStatus').textContent=contacts.length+' email contacts exported. No messages were sent.';
 };
+
+function renderSourceDetails(L){
+  const raw=L.sourceRequest||L.latestRaw||{},req=raw.data?.request||raw.request||{};
+  const rows=[['Source category',L.requestType],['Request created (source)',L.sourceCreatedAt],['Source timezone',L.sourceTimezone],['Source location',L.location],['Travel preference',L.travelPreference],['Price estimate — not customer budget',formatEstimate(L.estimate)||L.thumbtackPrice],['Lead cost',L.leadPrice??L.leadCost],['Included',L.included],['Competition (source snapshot)',L.competition],...requestDetails(raw).map(d=>[d.question,d.answer])];
+  for(const [label,field] of [['Reads music','readsMusic'],['Instrument at home','instrumentAtHome'],['Has piano / keyboard','hasPiano'],['Meeting method','meetingMethod'],['Meeting link','meetingLink'],['Travel range','travelRange'],['Venue','venue'],['Address','address'],['Load-in','loadIn'],['Sound','sound'],['Microphones','microphones'],['Power','power'],['Parking','parking'],['Dress code','dressCode'],['Special songs','specialSongs'],['Instructions','instructions']])if(L[field])rows.push([label,L[field]]);
+  for(const msg of L.conversation||[])rows.push(['Conversation · '+(msg.from||'Unknown sender')+(msg.sentAt?' · '+msg.sentAt:''),msg.text]);
+  const proposed=req.proposedTimes;
+  if(Array.isArray(proposed)&&proposed.length)rows.push(['Proposed times from source — not a confirmed lesson',proposed.map(t=>[t.start,t.end].filter(Boolean).join(' → ')).join('; ')]);
+  document.querySelector('#sourceDetailsRows').innerHTML=rows.filter(([,value])=>value!==undefined&&value!==null&&value!=='').map(([label,value])=>'<dt>'+esc(label)+'</dt><dd>'+esc(answerText(value))+'</dd>').join('')||'<p>No additional source details were supplied.</p>';
+  document.querySelector('#sourceDetails').hidden=false;
+  document.querySelector('#lessonSaveStatus').textContent=backendSupportsLessons?'Lesson details save with this lead.':'Lesson fields can be reviewed here; server update required to save them.';
+}
