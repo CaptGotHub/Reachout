@@ -1,7 +1,81 @@
+// BEGIN SHARED LEAD MODEL
+// Shared, pure lead classification and Thumbtack request-field mapping.
+const LESSON_FIELDS = ['studentName','studentAge','studentLevel','lessonInstrument','lessonGoals','lessonFormat','lessonLocation','lessonTimes','lessonLength','lessonFrequency','lessonRate','lessonNotes'];
+const DETAIL_FIELDS = [...LESSON_FIELDS,'travelPreference','guestAge','musicType','included','competition','sourceCreatedAt','sourceTimezone'];
+const present = value => value !== undefined && value !== null && value !== '';
+function answerText(value) {
+  if (!present(value)) return '';
+  if (Array.isArray(value)) return value.map(answerText).filter(Boolean).join('; ');
+  if (typeof value === 'object') return answerText(value.text ?? value.label ?? value.value ?? value.name ?? value.answer ?? value.answers ?? '');
+  return String(value);
+}
+function requestDetails(raw = {}) {
+  const details = raw?.data?.request?.details ?? raw?.request?.details ?? [];
+  if (!Array.isArray(details)) return [];
+  return details.map(d => ({question:answerText(d.question ?? d.label),answer:answerText(d.answer ?? d.answers ?? d.value)})).filter(d=>d.question && d.answer);
+}
+function serviceCode(lead = {}) {
+  const raw = lead.sourceRequest || lead.latestRaw || {};
+  const category = answerText(raw?.data?.request?.category?.name ?? raw?.request?.category?.name);
+  const type = [lead.requestType,lead.request,lead.serviceName,lead.service_name,(lead.detailOverrides||[]).includes('requestType')?'':category].filter(Boolean).join(' ');
+  // Specific lesson categories win over the old blanket LIVE MUSIC workspace.
+  if (/piano\s*lessons?|keyboard\s*lessons?/i.test(type)) return 'PIANO_LESSON';
+  if (/lessons?/i.test(type)) return 'MUSIC_LESSON';
+  if (/rental|furnished finder/i.test(type+' '+(lead.workspace||'')+' '+(lead.source||''))) return 'RENTAL';
+  if (/spinstream|nfartifact/i.test(type+' '+(lead.workspace||''))) return 'SPINSTREAM';
+  if (/music|wedding|cocktail|party|band|musician|event|piano|performance/i.test(type)) return 'LIVE_MUSIC';
+  if (['PIANO_LESSON','MUSIC_LESSON','LIVE_MUSIC','RENTAL','SPINSTREAM','OTHER'].includes(lead.serviceCode)) return lead.serviceCode;
+  return /lesson/i.test(lead.workspace||'')?'MUSIC_LESSON':/music/i.test(lead.workspace||'')?'LIVE_MUSIC':'OTHER';
+}
+const isLesson = lead => /^(PIANO|MUSIC)_LESSON$/.test(serviceCode(lead));
+const workspaceFor = lead => ({PIANO_LESSON:'Piano Lessons',MUSIC_LESSON:'Music Lessons',LIVE_MUSIC:'Live Music',RENTAL:'Rentals',SPINSTREAM:'SpinStream / NFArtifact',OTHER:'All'}[serviceCode(lead)]);
+function normalizeLead(input = {}) {
+  const lead = {...input};
+  const raw = lead.sourceRequest || lead.latestRaw || {};
+  const req = raw?.data?.request ?? raw?.request ?? {};
+  const customer = raw?.data?.customer ?? raw?.customer ?? {};
+  const put = (key,value) => {if (!(lead.detailOverrides||[]).includes(key) && !present(lead[key]) && present(value)) lead[key]=answerText(value);};
+  if (!(lead.detailOverrides||[]).includes('requestType') && (!lead.requestType || lead.requestType==='Live Music') && req.category?.name) lead.requestType=req.category.name;
+  put('name',customer.displayName || [customer.firstName,customer.lastName].filter(Boolean).join(' '));
+  put('email',customer.email);put('phone',customer.phoneNumber || customer.phone);
+  put('sourceCreatedAt',req.createdAt || raw?.data?.createdAt);
+  put('sourceTimezone',req.timeZone || req.timezone);
+  if (req.location && typeof req.location==='object') put('location',[req.location.city,req.location.state,req.location.zipCode].filter(Boolean).join(', '));
+  lead.serviceCode=serviceCode(lead);
+  if(isLesson(lead)||!lead.workspace)lead.workspace=workspaceFor(lead);
+  const lesson=isLesson(lead);
+  if (lesson) {
+    put('studentName',lead.name);put('studentAge',lead.guestAge);put('lessonLocation',lead.location);
+    if(lead.serviceCode==='PIANO_LESSON')put('lessonInstrument','Piano');
+  }
+  for(const {question,answer} of requestDetails(raw)) {
+    const q=question.toLowerCase();
+    if(/travel/.test(q))put('travelPreference',answer);
+    if(/included/.test(q))put('included',answer);
+    if(lesson){
+      if(/age|how old/.test(q))put('studentAge',answer);
+      else if(/experience|level|taken.*lesson/.test(q))put('studentLevel',answer);
+      else if(/instrument/.test(q))put('lessonInstrument',answer);
+      else if(/goal|learn|interest/.test(q))put('lessonGoals',answer);
+      else if(/length|duration/.test(q))put('lessonLength',answer);
+      else if(/frequency|how often/.test(q))put('lessonFrequency',answer);
+      else if(/timeline|availability|scheduling|days|times|when/.test(q))put('lessonTimes',answer);
+      else if(/format|online|remote|in.person/.test(q))put('lessonFormat',answer);
+      else if(/location|where/.test(q))put('lessonLocation',answer);
+    }else{
+      if(/guest.*age|age.*guest/.test(q))put('guestAge',answer);
+      if(/music type|instrumentation/.test(q))put('musicType',answer);
+    }
+  }
+  if(lesson)put('lessonGoals',lead.message || lead.customerMessage);
+  // A request's proposed times are not a booked lesson, and an estimate is not a budget.
+  return lead;
+}
+// END SHARED LEAD MODEL
 /**
  * ReachOut Answer
  * Worker: reachout-respond
- * Version: RA-20261006-04-contacts
+ * Version: RA-20261030-01-lessons
  */
 
 export default {
@@ -9,10 +83,10 @@ export default {
     const url = new URL(request.url);
     try {
       if (request.method === "GET" && url.pathname === "/") {
-        return json({ ok: true, service: "ReachOut Answer", version: "RA-20261006-04-contacts", status: "online" });
+        return json({ ok: true, service: "ReachOut Answer", version: "RA-20261030-01-lessons", status: "online" });
       }
       if (request.method === "GET" && url.pathname === "/health") {
-        return json({ ok: true, service: "ReachOut Answer", version: "RA-20261006-04-contacts", status: "ready", kvConnected: !!env.REACHOUT_LEADS, webhook: "/webhooks/thumbtack", leads: "/api/leads", csvImport: "/api/admin/import-thumbtack", csvBatchSize: 10 });
+        return json({ ok: true, service: "ReachOut Answer", version: "RA-20261030-01-lessons", status: "ready", kvConnected: !!env.REACHOUT_LEADS, webhook: "/webhooks/thumbtack", leads: "/api/leads", csvImport: "/api/admin/import-thumbtack", csvBatchSize: 10, lessonFieldsVersion: 1 });
       }
       if (request.method === "POST" && url.pathname === "/webhooks/thumbtack") {
         return await receiveThumbtack(request, env);
@@ -99,7 +173,9 @@ async function receiveThumbtack(request, env) {
   lead.firstName = fields.firstName || lead.firstName || null;
   lead.email = fields.email || lead.email || null;
   lead.phone = fields.phone || lead.phone || null;
-  lead.requestType = fields.requestType || lead.requestType || "Live Music";
+  if (!(lead.detailOverrides||[]).includes("requestType")) lead.requestType = fields.requestType || lead.requestType || "Other";
+  if (payload.data?.request || payload.request) lead.sourceRequest = payload;
+  for (const field of DETAIL_FIELDS) { if (!(lead.detailOverrides||[]).includes(field) && fields[field] !== undefined && fields[field] !== null && fields[field] !== "") lead[field] = fields[field]; }
   lead.eventDate = fields.eventDate || lead.eventDate || null;
   lead.startTime = fields.startTime || lead.startTime || null;
   lead.endTime = fields.endTime || lead.endTime || null;
@@ -114,6 +190,7 @@ async function receiveThumbtack(request, env) {
   lead.estimate = fields.estimate || lead.estimate || null;
   lead.calendarStatus = lead.calendarStatus || "UNKNOWN";
   lead.latestRaw = payload;
+  Object.assign(lead,normalizeLead(lead));
   lead.missing = missingFields(lead);
   lead.suggestedResponse = makeResponse(lead);
   await env.REACHOUT_LEADS.put("lead:" + leadId, JSON.stringify(lead));
@@ -149,7 +226,7 @@ async function listLeads(env, url) {
 async function getLead(id, env) {
   const lead = await readJSON(env.REACHOUT_LEADS, "lead:" + id);
   if (!lead) return apiJson({ ok: false, error: "lead_not_found" }, 404);
-  return apiJson({ ok: true, lead });
+  return apiJson({ ok: true, lead: normalizeLead(lead) });
 }
 
 async function patchLead(id, request, env) {
@@ -157,23 +234,30 @@ async function patchLead(id, request, env) {
   if (!lead) return apiJson({ ok: false, error: "lead_not_found" }, 404);
   let changes;
   try { changes = await request.json(); } catch { return apiJson({ ok: false, error: "invalid_json" }, 400); }
-  const allowed = ["status","calendarStatus","eventDate","startTime","endTime","location","musicians","style","message","budget","guestCount","eventType","fee","deposit","notes","name","email","phone","requestType","archived"];
+  const allowed = ["status","calendarStatus","eventDate","startTime","endTime","location","musicians","style","message","budget","guestCount","eventType","fee","deposit","notes","name","email","phone","requestType","archived","serviceCode","workspace",...DETAIL_FIELDS];
   if (!changes || typeof changes !== "object" || Array.isArray(changes)) return apiJson({ ok: false, error: "invalid_changes" }, 400);
   if ("archived" in changes && typeof changes.archived !== "boolean") return apiJson({ ok: false, error: "invalid_archive_state" }, 400);
   for (const field of ["name","email","phone","requestType"]) {
     if (field in changes && changes[field] !== null && (typeof changes[field] !== "string" || changes[field].length > 500)) return apiJson({ ok: false, error: "invalid_contact_field" }, 400);
   }
+  for (const field of [...DETAIL_FIELDS,"serviceCode","workspace"]) {
+    if (field in changes && changes[field] !== null && (typeof changes[field] !== "string" || changes[field].length > 12000)) return apiJson({ok:false,error:"invalid_detail_field",field},400);
+  }
   for (const field of allowed) { if (field in changes) { lead[field] = changes[field]; } }
+  lead.detailOverrides=[...new Set([...(lead.detailOverrides||[]),...[...DETAIL_FIELDS,"requestType"].filter(field=>field in changes)])];
+  lead.serviceCode = serviceCode(lead); lead.workspace = workspaceFor(lead);
   lead.updatedAt = new Date().toISOString();
   lead.missing = missingFields(lead);
   lead.suggestedResponse = makeResponse(lead);
   await env.REACHOUT_LEADS.put("lead:" + id, JSON.stringify(lead));
   await updateIndex(env, lead);
-  return apiJson({ ok: true, lead });
+  return apiJson({ ok: true, lead: normalizeLead(lead) });
 }
 
 function leadSummary(lead) {
+  lead = normalizeLead(lead);
   return {
+    serviceCode:lead.serviceCode,
     id: lead.id, source: lead.source, workspace: lead.workspace, status: lead.status,
     name: lead.name || lead.firstName || "New Thumbtack Lead",
     phone: lead.phone || null, email: lead.email || null,
@@ -350,7 +434,9 @@ async function reindexLeads(env) {
       lead.eventType = fields.eventType || lead.eventType || null;
       lead.leadPrice = fields.leadPrice || lead.leadPrice || null;
       lead.estimate = fields.estimate || lead.estimate || null;
-      lead.requestType = fields.requestType || lead.requestType || "Live Music";
+      if (!(lead.detailOverrides||[]).includes("requestType")) lead.requestType = fields.requestType || lead.requestType || "Other";
+  if (payload.data?.request || payload.request) lead.sourceRequest = payload;
+  for (const field of DETAIL_FIELDS) { if (fields[field] !== undefined && fields[field] !== null && fields[field] !== "") lead[field] = fields[field]; }
     }
     allLeads.push({ key: key.name, lead });
   }
@@ -415,7 +501,9 @@ function extractFields(payload) {
   let eventDate = deepFind(payload, ["event_date", "eventDate", "job_date"]);
   let startTime = deepFind(payload, ["start_time", "startTime"]);
   let endTime = deepFind(payload, ["end_time", "endTime"]);
-  if (proposedTimes && Array.isArray(proposedTimes) && proposedTimes.length > 0) {
+  const category = deepGet(payload,["data","request","category","name"]) || deepFind(payload,["service_name","serviceName","job_type","jobType"]);
+  const lesson = isLesson({requestType:category});
+  if (!lesson && proposedTimes && Array.isArray(proposedTimes) && proposedTimes.length > 0) {
     const first = proposedTimes[0];
     if (first && first.start) {
       const startDt = new Date(first.start);
@@ -433,7 +521,7 @@ function extractFields(payload) {
   }
   let location = deepFind(payload, ["location", "job_location", "jobLocation", "city"]);
   const reqLocation = deepGet(payload, ["data", "request", "location"]);
-  if (!location && reqLocation) {
+  if (reqLocation && typeof reqLocation === 'object') {
     const parts = [reqLocation.city, reqLocation.state, reqLocation.zipCode].filter(Boolean);
     if (parts.length) { location = parts.join(", "); }
   }
@@ -445,16 +533,16 @@ function extractFields(payload) {
   let eventType = deepFind(payload, ["event_type", "eventType"]);
   if (details && Array.isArray(details)) {
     for (const d of details) {
-      if (!d.question || !d.answer) continue;
+      if (!d.question || d.answer===undefined || d.answer===null) continue;
       const q = String(d.question).toLowerCase();
-      const a = String(d.answer);
+      const a = answerText(d.answer);
       if (q.includes("genre") && !style) { style = a; }
       if (q.includes("music type") && !style) { style = a; }
       if (q.includes("musician") && !musicians) { musicians = a; }
-      if (q.includes("guest") && !guestCount) { guestCount = a; }
+      if (q.includes("guest") && !q.includes("age") && !guestCount) { guestCount = a; }
       if (q.includes("budget") && !budget) { budget = a; }
       if (q.includes("event type") && !eventType) { eventType = a; }
-      if (q.includes("scheduling") && !eventDate) {
+      if (!lesson && q.includes("scheduling") && !eventDate) {
         const dateMatch = a.match(/Date:\s*(.+)/);
         if (dateMatch) { eventDate = dateMatch[1].trim(); }
         const timeMatch = a.match(/Time:\s*(.+)/);
@@ -464,15 +552,16 @@ function extractFields(payload) {
   }
   const estimateRaw = deepGet(payload, ["data", "estimate"]);
   let estimate = null;
-  if (estimateRaw) { estimate = { pricePerUnit: estimateRaw.pricePerUnit || null, unitName: estimateRaw.unitName || null, total: estimateRaw.total || null }; }
+  if (estimateRaw) { estimate = { pricePerUnit: estimateRaw.pricePerUnit ?? null, unitName: estimateRaw.unitName ?? null, total: estimateRaw.total ?? null, duration: estimateRaw.duration ?? null, included: estimateRaw.included ?? null }; }
   let leadPrice = deepFind(payload, ["leadPrice", "lead_price"]);
   let requestType = deepFind(payload, ["service_name", "serviceName", "job_type", "jobType"]);
   const categoryName = deepGet(payload, ["data", "request", "category", "name"]);
   if (!requestType && categoryName) { requestType = categoryName; }
-  return { name, firstName, email: deepFind(payload, ["email", "customer_email", "customerEmail"]), phone: deepFind(payload, ["phone", "phone_number", "phoneNumber"]), requestType: requestType || "Live Music", eventDate, startTime, endTime, location, message, musicians, style, budget, guestCount, eventType, leadPrice, estimate };
+  return normalizeLead({ name, firstName, email: customer?.email || deepFind(payload,["customer_email","customerEmail"]), phone: customer?.phoneNumber || customer?.phone || deepFind(payload,["phone","phone_number","phoneNumber"]), requestType: requestType || null, eventDate, startTime, endTime, location, message, musicians, style, budget, guestCount, eventType, leadPrice, estimate, sourceRequest:payload });
 }
 
 function missingFields(lead) {
+  if(isLesson(lead)){lead=normalizeLead(lead);return [["lessonTimes","preferred days / times"],["lessonFormat","online or in-person lesson preference"]].filter(([field])=>!lead[field]||lead[field]==="TBD").map(([,label])=>label);}
   const missing = [];
   if (!lead.eventDate) missing.push("event date");
   if (!lead.startTime) missing.push("start time");
@@ -483,7 +572,17 @@ function missingFields(lead) {
 
 function makeResponse(lead) {
   if (lead.recordType === "THUMBTACK_CONTACT_IMPORT") return "";
+  lead=normalizeLead(lead);
   const firstName = lead.firstName || firstWord(lead.name) || "there";
+  if(isLesson(lead)){
+    let text="Hi "+firstName+" — thanks for reaching out about "+(lead.lessonInstrument||"music")+" lessons.";
+    if(lead.lessonTimes)text+=" I noted your availability: "+lead.lessonTimes+".";
+    if(lead.lessonGoals)text+=" I saw your goals and would be glad to work through them with you.";
+    const missing=missingFields(lead);
+    if(missing.length)text+=" Could you confirm your "+missing.join(" and ")+"?";
+    else text+=" I will check my availability before confirming a first lesson.";
+    return text+"\n\nNick Laudani\n617-233-2008";
+  }
   let text = "Hi " + firstName + " — thanks for reaching out";
   if (lead.requestType) { text += " about " + String(lead.requestType).toLowerCase(); }
   text += ".";
