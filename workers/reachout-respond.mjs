@@ -38,6 +38,13 @@ export default {
         }
         return apiJson({ ok: false, error: "method_not_allowed" }, 405);
       }
+      const invoiceRoute = url.pathname.match(/^\/api\/leads\/([^/]+)\/paypal-deposit$/);
+      if (invoiceRoute) {
+        if (request.method === "OPTIONS") return new Response(null, {status:204, headers:apiCors()});
+        if (!checkAuth(request, env)) return apiJson({error:"Unlock the owner inbox first."},401);
+        if (request.method !== "POST") return apiJson({error:"POST required."},405);
+        return createDepositLink(decodeURIComponent(invoiceRoute[1]), env);
+      }
       const isLeadsPath = url.pathname === "/api/leads" || /^\/api\/leads\/([^/]+)$/.test(url.pathname);
       if (isLeadsPath) {
         if (request.method === "OPTIONS") { return new Response(null, { status: 204, headers: apiCors() }); }
@@ -565,4 +572,48 @@ function apiJson(data, status = 200) {
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...corsHeaders() } });
+}
+
+async function createDepositLink(id, env) {
+  const lead = await readJSON(env.REACHOUT_LEADS, 'lead:' + id);
+  if (!lead || lead.archived || /lesson|rental|spinstream/i.test(lead.requestType || '')) return apiJson({error:'Select an active live music booking.'},400);
+  const amount = Number(lead.deposit), fee = Number(lead.fee);
+  if (!lead.name || !lead.eventDate || !(amount > 0 && fee >= amount) || !Number.isFinite(fee)) return apiJson({error:'Save the customer, date, total fee and deposit first.'},400);
+  const mode = env.PAYPAL_ENV;
+  if (!['live','sandbox'].includes(mode) || !env.PAYPAL_CLIENT_ID || !env.PAYPAL_CLIENT_SECRET) return apiJson({error:'PayPal Invoicing needs to be connected in the ReachOut Worker.'},503);
+  const host = mode === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com';
+  const booking = JSON.stringify([String(lead.name).trim().toLowerCase(),lead.eventDate,String(lead.location||'').trim().toLowerCase()]);
+  const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(booking))), n=>n.toString(16).padStart(2,'0')).join('').slice(0,20);
+  const invoiceNumber = 'RO-' + hash;
+  const key = 'paypal:' + mode + ':' + hash;
+  const saved = await readJSON(env.REACHOUT_LEADS,key);
+  if (saved && (saved.amount !== amount || saved.fee !== fee)) return apiJson({error:'The quote has changed. Review the existing invoice in PayPal before issuing another.'},409);
+  const auth = await fetch(host+'/v1/oauth2/token',{method:'POST',headers:{Authorization:'Basic '+btoa(env.PAYPAL_CLIENT_ID+':'+env.PAYPAL_CLIENT_SECRET),'Content-Type':'application/x-www-form-urlencoded'},body:'grant_type=client_credentials'});
+  if (!auth.ok) return apiJson({error:'PayPal could not authorize this merchant account.'},502);
+  const {access_token:token} = await auth.json();
+  const headers = {Authorization:'Bearer '+token,'Content-Type':'application/json'};
+  const base = host+'/v2/invoicing/invoices';
+  let invoiceId = saved?.id;
+  if (!invoiceId) {
+    const description = [lead.eventDate,[lead.startTime,lead.endTime].filter(Boolean).join(' – '),lead.location,lead.musicians,lead.style].filter(Boolean).join(' · ');
+    const payload = {detail:{invoice_number:invoiceNumber,currency_code:'USD',note:'Total quote $'+fee.toFixed(2)+'. Balance after deposit $'+(fee-amount).toFixed(2)+'.'},primary_recipients:[{billing_info:{name:{full_name:lead.name}}}],items:[{name:'Live music booking deposit',description:description.slice(0,1000),quantity:'1',unit_amount:{currency_code:'USD',value:amount.toFixed(2)}}]};
+    const res=await fetch(base,{method:'POST',headers:{...headers,'PayPal-Request-Id':invoiceNumber,Prefer:'return=representation'},body:JSON.stringify(payload)});
+    if (!res.ok) return apiJson({error:'PayPal could not create this invoice. Check existing invoices before retrying.'},502);
+    const result=await res.json();
+    invoiceId=result.id || (result.href||res.headers.get('location')||'').split('/').pop();
+    if (!/^INV2-[A-Za-z0-9-]+$/.test(invoiceId||'')) return apiJson({error:'Check PayPal for the invoice before retrying.'},502);
+    await env.REACHOUT_LEADS.put(key,JSON.stringify({id:invoiceId,amount,fee}));
+  }
+  const url=base+'/'+encodeURIComponent(invoiceId);
+  const getInvoice=async()=>{const res=await fetch(url,{headers});return res.ok?res.json():null};
+  let invoice=await getInvoice();
+  if (invoice?.status==='DRAFT') {
+    const sent=await fetch(url+'/send',{method:'POST',headers:{...headers,'PayPal-Request-Id':invoiceNumber+'-link'},body:JSON.stringify({send_to_recipient:false,send_to_invoicer:false})});
+    if (!sent.ok) return apiJson({error:'Invoice created. PayPal could not activate the payment link.'},502);
+    invoice=await getInvoice();
+  }
+  const link=invoice?.detail?.metadata?.recipient_view_url;
+  if (invoice?.status!=='SENT' && invoice?.status!=='UNPAID') return apiJson({error:'Invoice status: '+(invoice?.status||'unavailable')+'. Check PayPal before requesting payment.'},409);
+  if (!link || new URL(link).origin !== (mode==='live'?'https://www.paypal.com':'https://www.sandbox.paypal.com')) return apiJson({error:'PayPal has not returned a customer link yet.'},502);
+  return apiJson({link,mode});
 }

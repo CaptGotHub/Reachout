@@ -143,6 +143,9 @@ async function openLead(id){
   missingBox.innerHTML=(L.missing&&L.missing.length)?'<b>Still useful to ask:</b> '+L.missing.map(esc).join(' · '):'<b>Lead loaded. Review only what this customer actually needs.</b>';
   applyLeadContext(L);
   renderContactHistory(L);
+  document.querySelector('#quoteInclusions').value = (String(L.notes || '').match(/^Quote inclusions: (.+)$/im) || [,''])[1];
+  const savedProposal = String(L.notes || '').match(/\bProposal #(\d+)\b/);
+  if (savedProposal) setField('proposalNumber', savedProposal[1]);
   loadedLeadId=id;
   showInvoicePanel();
 }
@@ -414,6 +417,8 @@ document.querySelector('#exportArchiveEmails').onclick=()=>{
 };
 
 function resetInvoicePanel(){
+  document.querySelector('#bookingReply').value='';
+  document.querySelector('#quoteInclusions').value='';
   document.querySelector('#paypalPanel').hidden=true;
   document.querySelector('#paypalLink').value='';
   document.querySelector('#paypalStatus').textContent='';
@@ -461,3 +466,52 @@ async function shareInvoice(byEmail){
 document.querySelector('#paypalCopy').onclick=()=>shareInvoice(false);
 document.querySelector('#paypalEmail').onclick=()=>shareInvoice(true);
 f.elements.deposit.addEventListener('input',showInvoicePanel);
+
+function composeBookingReply(d, inclusions, link) {
+  const firstName = String(d.name || 'there').trim().split(/\s+/)[0];
+  const lines = ['Hi ' + firstName + ',', ''];
+  const booking = [d.musicians && d.musicians !== 'Not sure' ? d.musicians : '', d.style].filter(Boolean).join(' · ');
+  const schedule = [d.date && niceDate(d.date), [niceTime(d.start), niceTime(d.end)].filter(Boolean).join(' – '), d.location].filter(Boolean).join(' · ');
+  lines.push('Here are the details for your live music booking.', [booking, schedule].filter(Boolean).join('\n'));
+  const fee = Number(d.fee), deposit = Number(d.deposit);
+  if (fee > 0) lines.push('Total quote: ' + dollars(fee) + (inclusions ? ' (' + inclusions + ')' : '') + '.');
+  if (deposit > 0) lines.push('Booking deposit: ' + dollars(deposit) + '.' + (fee >= deposit ? ' Balance after the deposit: ' + dollars(fee - deposit) + '.' : ''));
+  if (d.proposalNumber) lines.push('Proposal #' + String(d.proposalNumber).replace(/^#/, '') + '.');
+  if (link) lines.push('', 'You can pay the deposit here: ' + link);
+  lines.push('', 'Let me know if these details look right to you.', '', 'Thanks,', 'Nick Laudani', '617-233-2008');
+  return lines.join('\n');
+}
+document.querySelector('#prepareBookingReply').onclick = () => {
+  if (!activeLeadId || loadedLeadId !== activeLeadId) return;
+  const raw = document.querySelector('#paypalLink').value.trim();
+  const link = customerInvoiceUrl(raw);
+  const status = document.querySelector('#paypalStatus');
+  if (raw && !link) { status.textContent = 'Check the PayPal customer link before preparing the reply.'; return; }
+  document.querySelector('#bookingReply').value = composeBookingReply(v(), document.querySelector('#quoteInclusions').value.trim(), link);
+  status.textContent = link ? 'Reply ready to review.' : 'Reply ready. Add a customer invoice link and prepare again to include payment instructions.';
+};
+document.querySelector('#copyBookingReply').onclick = async () => {
+  const reply = document.querySelector('#bookingReply').value.trim();
+  const status = document.querySelector('#paypalStatus');
+  if (!reply) { status.textContent = 'Prepare the booking reply first.'; return; }
+  try { await navigator.clipboard.writeText(reply); status.textContent = 'Booking reply copied.'; }
+  catch { status.textContent = 'Select and copy the booking reply above.'; }
+};
+document.querySelector('#generateDepositLink').onclick = async function(){
+  const id=loadedLeadId;
+  if(!id || id!==activeLeadId)return;
+  this.disabled=true;
+  const status=document.querySelector('#paypalStatus');
+  status.textContent='Requesting the invoice for the saved quote…';
+  try{
+    const response=await apiFetch(API+'/api/leads/'+encodeURIComponent(id)+'/paypal-deposit',{method:'POST'});
+    const data=await response.json();
+    if(id!==activeLeadId)return;
+    if(!response.ok)throw new Error(response.status===404?'The invoice connection is awaiting Worker deployment.':data.error||'PayPal is unavailable.');
+    if(data.mode!=='live')throw new Error('Sandbox invoice created for testing. No live payment link was added.');
+    if(!customerInvoiceUrl(data.link))throw new Error('The returned invoice link needs review in PayPal.');
+    document.querySelector('#paypalLink').value=data.link;
+    document.querySelector('#prepareBookingReply').click();
+  }catch(error){if(id===activeLeadId)status.textContent=error.message}
+  finally{this.disabled=false}
+};
