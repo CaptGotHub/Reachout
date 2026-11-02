@@ -1,0 +1,9 @@
+# Thumbtack first replies
+
+Deploy the updated reachout-respond Worker with the feature disabled initially. Keep existing bindings. Add a Durable Object binding FIRST_REPLIES for exported class FirstReply and a new SQLite-class migration for FirstReply (append to existing migrations). Use a current Workers compatibility date.
+
+Configure X-ReachOut-Webhook in the Thumbtack webhook registration(s) posting to /webhooks/thumbtack. Set matching Worker secret THUMBTACK_WEBHOOK_SECRET. Every webhook to that route must carry this header when the feature is enabled. Configure THUMBTACK_BUSINESS_ID as a string. Supply a valid business-user OAuth access token as THUMBTACK_ACCESS_TOKEN with negotiation read, message history read and supply::messages.write permission. Reauthorize the business after adding scopes. This Worker does not refresh OAuth tokens: connect token renewal before unattended operation. Never commit tokens.
+
+Stage first with THUMBTACK_STAGE=staging, staging credentials and a staging business. Set THUMBTACK_FIRST_REPLY=enabled only after the above is ready. Create a new test lead in Thumbtack staging, verify its webhook envelope and check the first reply appears once inside the corresponding conversation. Replay delivery and check no additional reply appears. Test an already answered lead. Check Worker logs for THUMBTACK_FIRST_REPLY. After verification set production bindings and credentials in production and omit THUMBTACK_STAGE (or set production). Check other native or third-party senders are disabled before enabling. Disable by removing THUMBTACK_FIRST_REPLY.
+
+Existing contacts are not backfilled. Only fresh, open leads for the configured business and a supported music category qualify. An uncertain send is held for owner review; check the thread before any manual retry. Read failures before an outbound attempt use Durable Object alarm retries. An accepted API response does not establish customer read status.
