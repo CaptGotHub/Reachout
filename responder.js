@@ -226,7 +226,13 @@ function buildRentalQuickAnswer(d){
   s+='\n\nNick Laudani\n617-233-2008';
   return {text:s,focus,missing};
 }document.querySelectorAll('[data-avail]').forEach(b=>b.onclick=()=>setAvailability(b.dataset.avail));f.onsubmit=e=>{
-  e.preventDefault(); const d=v(),workspace=selectedWorkspace();
+  e.preventDefault();
+  buildDetailedAnswer();
+  out.focus({preventScroll:true});
+  out.scrollIntoView({block:"center"});
+};
+function buildDetailedAnswer(){
+  const d=v(),workspace=selectedWorkspace();
   if(activeArchivedContact){out.value=archiveFollowup(d);updateArchiveContactLinks();missingBox.textContent='Archive follow-up draft. Review before sending.';return;}
   if(workspace==='Rentals'){
     const rental=buildRentalQuickAnswer(d);
@@ -243,6 +249,13 @@ function buildRentalQuickAnswer(d){
     s+=' I received your question and can use those details to look at the right record or issue.';
     if(d.offerCall==='Yes')s+=' If a call would be easier, send me a couple of times that work.';
     s+='\n\nNick Laudani'; out.value=s; missingBox.innerHTML='<b>SpinStream workflow:</b> identify the record, tier and exact question before answering'; return;
+  }
+  if(lessonMode()){document.querySelector('#buildLessonAnswer').click();return}
+  if(Number(d.fee)>0 && Number(d.deposit)>0){
+    const link=customerInvoiceUrl(document.querySelector('#paypalLink').value);
+    out.value=composeBookingReply(d,document.querySelector('#quoteInclusions').value.trim(),link);
+    missingBox.textContent=link?'Booking reply ready with the invoice link.':'Booking reply ready. No payment link attached.';
+    return;
   }
   const miss=[]; if(!d.date)miss.push('date'); if(!d.location)miss.push('location / venue'); if(!d.start||!d.end)miss.push('event start / end time'); if(d.musicians==='Not sure')miss.push('musician setup');
   missingBox.innerHTML=miss.length?'<b>Still useful to ask:</b> '+miss.join(' · '):'<b>Core event details present.</b>';
