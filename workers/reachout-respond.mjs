@@ -86,6 +86,9 @@ async function receiveThumbtack(request, env) {
   if (!env.REACHOUT_LEADS) return json({ ok: false, error: "REACHOUT_LEADS_not_bound" }, 500);
   let payload;
   try { payload = await request.json(); } catch { return json({ ok: false, error: "invalid_json" }, 400); }
+  const instant = env.THUMBTACK_FIRST_REPLY === "enabled";
+  if (instant && (!env.THUMBTACK_WEBHOOK_SECRET || request.headers.get("X-ReachOut-Webhook") !== env.THUMBTACK_WEBHOOK_SECRET))
+    return json({ok:false,error:"invalid_webhook_credentials"},401);
   const now = new Date().toISOString();
   const fields = extractFields(payload);
   const negotiationId = deepFind(payload, ["negotiation_id", "negotiationId", "negotiationID"]);
@@ -127,6 +130,14 @@ async function receiveThumbtack(request, env) {
   await env.REACHOUT_LEADS.put("event:" + leadId + ":" + safeId(String(eventId)), JSON.stringify({ eventId, leadId, receivedAt: now, payload }));
   await updateIndex(env, lead);
   console.log("REACHOUT_LEAD_STORED", { leadId, eventCount: lead.eventCount });
+  if (instant && (payload.eventType || payload.event_type || payload.event?.eventType || payload.event?.type) === "NegotiationCreatedV4") {
+    const id = payload.data?.negotiationID;
+    if (typeof id === "string" && /^\d+$/.test(id)) {
+      const object = env.FIRST_REPLIES.get(env.FIRST_REPLIES.idFromName(id));
+      const queued = await object.fetch("https://internal/queue", {method:"POST",body:id});
+      if (!queued.ok) return json({ok:false,error:"first_reply_queue_unavailable"},503);
+    }
+  }
   return json({ ok: true, received: true, stored: true, leadId });
 }
 
@@ -616,4 +627,66 @@ async function createDepositLink(id, env) {
   if (invoice?.status!=='SENT' && invoice?.status!=='UNPAID') return apiJson({error:'Invoice status: '+(invoice?.status||'unavailable')+'. Check PayPal before requesting payment.'},409);
   if (!link || new URL(link).origin !== (mode==='live'?'https://www.paypal.com':'https://www.sandbox.paypal.com')) return apiJson({error:'PayPal has not returned a customer link yet.'},502);
   return apiJson({link,mode});
+}
+
+// One durable record per conversation, independent of the changing customer/contact fields.
+export class FirstReply {
+  constructor(state, env) { this.storage=state.storage; this.env=env; }
+  async fetch(request) {
+    const id=await request.text();
+    await this.storage.transaction(async txn=>{
+      if(await txn.get('job'))return;
+      await txn.put('job',{id,state:'queued'});
+      await txn.setAlarm(Date.now()+1);
+    });
+    return new Response(null,{status:202});
+  }
+  async alarm() {
+    const job=await this.storage.get('job');
+    if(!job || job.state!=='queued')return;
+    const finish=async(state,reason)=>{
+      await this.storage.put('job',{id:job.id,state,reason,at:new Date().toISOString()});
+      console.log('THUMBTACK_FIRST_REPLY',job.id,state,reason);
+    };
+    if(this.env.THUMBTACK_FIRST_REPLY!=='enabled')return finish('skipped','disabled');
+    const token=this.env.THUMBTACK_ACCESS_TOKEN;
+    const business=this.env.THUMBTACK_BUSINESS_ID;
+    if(!token || !business)return finish('needs_review','missing_credentials');
+    const host=this.env.THUMBTACK_STAGE==='staging'?'https://staging-api.thumbtack.com':'https://api.thumbtack.com';
+    const url=host+'/api/v4/negotiations/'+job.id;
+    const headers={Authorization:'Bearer '+token};
+    const read=async(path)=>{
+      const r=await fetch(path,{headers});
+      if(!r.ok)throw new Error('Thumbtack read '+r.status);
+      return r.json();
+    };
+    const [raw,messages]=await Promise.all([read(url),read(url+'/messages')]);
+    const lead=raw.data || raw;
+    if(lead.negotiationID!==job.id || lead.business?.businessID!==business || lead.status!=='Open')return finish('skipped','not_active_business_lead');
+    const age=Date.now()-Date.parse(lead.createdAt);
+    if(!Number.isFinite(age)||age < -60000 || age>30*60000)return finish('skipped','outside_first_reply_window');
+    if(!Array.isArray(messages.data)|| messages.pagination?.next || messages.pagination?.nextCursor || messages.data.length >= Number(messages.pagination?.limit || Infinity) || messages.data.some(m=>m.from!=='Customer'))return finish('needs_review','prior_reply_or_incomplete_history');
+    const text=firstReplyText(lead);
+    if(!text)return finish('needs_review','unknown_service');
+    // Once a POST may have reached Thumbtack, never automatically repeat it.
+    await finish('sending','attempt_started');
+    try{
+      const r=await fetch(url+'/messages',{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({text})});
+      await finish(r.ok?'accepted':'needs_review','thumbtack_http_'+r.status);
+    }catch{await finish('needs_review','delivery_uncertain')}
+  }
+}
+
+export function firstReplyText(lead) {
+  const req=lead.request || {}, category=String(req.category?.name || '');
+  const greeting='Hi '+(lead.customer?.firstName || 'there')+', thanks for reaching out. ';
+  const details=Array.isArray(req.details)?req.details:[];
+  const answer=pattern=>String(details.find(d=>pattern.test(d.question || '') && typeof d.answer==='string')?.answer || '').trim().slice(0,160);
+  if(/piano lessons?/i.test(category)){
+    const goal=answer(/goal|want to learn|musical style/i);
+    return greeting+(goal?'I saw your note about what you want to learn: “'+goal+'”. ':'')+'I teach piano by ear, and we can work on theory too. My intro lesson is $25. '+(goal?'What days usually work for you?':'Is there a song you’d love to start with?')+' — Nick Laudani';
+  }
+  if(!/music entertainment|live music|jazz band|wedding band|solo musician/i.test(category))return '';
+  const city=req.location?.city, date=answer(/schedul|event date/i), style=answer(/genre|type of music/i);
+  return greeting+'I received your live music request'+(city?' for '+city:'')+'. '+(date?'I see the requested timing: '+date+'. ':'')+(style?'You mentioned '+style+'. ':'')+'I’ll check availability and follow up about the music. — Nick Laudani';
 }
