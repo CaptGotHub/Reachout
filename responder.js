@@ -587,3 +587,21 @@ for (const prefix of ['a','b']) {
 f.elements.deposit.addEventListener('input',refreshChoices);
 f.addEventListener('reset',()=>queueMicrotask(refreshChoices));
 refreshChoices();
+
+function calendarHoldUrl(d) {
+  if(!d.name || !d.date || !d.start || !d.end || d.end<=d.start)return '';
+  const stamp=t=>d.date.replaceAll('-','')+'T'+t.slice(0,5).replace(':','')+'00';
+  const url=new URL('https://calendar.google.com/calendar/r/eventedit');
+  const details=[d.request,d.musicians && d.musicians!=='Not sure'?d.musicians:'',d.style,
+    d.fee?'Quoted fee: $'+d.fee:'',d.deposit?'Deposit requested: $'+d.deposit:'','Tentative booking; confirm availability.'].filter(Boolean);
+  for(const [key,value] of Object.entries({action:'TEMPLATE',text:'Hold: '+d.name+' – '+(d.request||'Music booking'),dates:stamp(d.start)+'/'+stamp(d.end),ctz:'America/New_York',stz:'America/New_York',etz:'America/New_York',location:d.location||'',details:details.join('\n')}))url.searchParams.set(key,value);
+  return url.href;
+}
+document.getElementById('calendarHold').onclick=()=>{
+  const status=document.getElementById('calendarHoldStatus');
+  if(!activeLeadId || loadedLeadId!==activeLeadId){status.textContent='Select a lead first.';return}
+  const href=calendarHoldUrl(v());
+  if(!href){status.textContent='Enter a name, date, start and later end time for this hold.';return}
+  window.open(href,'_blank','noopener,noreferrer');
+  status.textContent='Review the hold in Google Calendar and choose Save.';
+};
