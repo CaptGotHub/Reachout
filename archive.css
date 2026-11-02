@@ -5,3 +5,12 @@ dialog::backdrop{background:#101b2bcc}dialog label{display:block}dialog input{wi
 .history-table{max-width:100%;max-height:280px;overflow:auto;margin:16px 0}
 .history-table table{width:100%;border-collapse:collapse;font-size:13px}.history-table th,.history-table td{text-align:left;padding:9px;border-bottom:1px solid #d8dce4}
 [hidden]{display:none!important}
+
+/* Keep the inbox inside its column, including at browser zoom. */
+.inbox-shell > *, .inbox-shell .panel, .inbox-shell .grid > * { min-width:0 }
+.inbox-panel { overflow-wrap:anywhere; overflow:hidden }
+.inbox-panel .inbox-title h2 { font-size:1.4rem; line-height:1.2; margin:0 }
+.inbox-panel .lead-row, .inbox-panel .lead-source { white-space:normal; overflow-wrap:anywhere; min-width:0; max-width:100% }
+.inbox-panel .lead-source { font-size:.75rem }
+@media(max-width:1000px){ .inbox-shell{grid-template-columns:minmax(0,1fr)} .inbox-panel{position:static} }
+.choice-card output { display:block; margin:12px 0; font-weight:700 }
