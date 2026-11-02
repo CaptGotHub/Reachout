@@ -112,6 +112,8 @@ let loadedLeadId=null;
 async function openLead(id){
   resetInvoicePanel();
   loadedLeadId=null;
+  document.querySelector('#saveLead').textContent='Save lead';
+  const status=document.querySelector('#saveStatus'); if(status)status.textContent='';
   activeLeadId=id; renderHub();
   const r=await apiFetch(API+'/api/leads/'+encodeURIComponent(id),{cache:'no-store'}),d=await r.json(); if(!r.ok)return;
   if(activeLeadId!==id)return;
@@ -127,7 +129,7 @@ async function openLead(id){
   setField('guestCount',L.guestCount??''); setField('guestAge',L.guestAge||''); setField('musicType',L.musicType||'');
   setField('budget',L.budget??''); setField('travelPreference',L.travelPreference||''); setField('thumbtackPrice',formatEstimate(L.estimate)||L.thumbtackPrice||'');
   setField('leadCost',L.leadPrice??L.leadCost??''); setField('competition',L.competition||''); setField('included',L.included||'');
-  setField('eventType',L.eventType??''); setField('fee',L.fee??''); setField('deposit',L.deposit??''); setField('notes',L.notes??'');
+  setField('eventType',L.eventType??''); setField('fee',L.fee??''); setField('deposit',L.deposit??''); setField('notes',L.notes || '');
   setSelect('request',L.requestType||L.request||'');
   setField('date',toDateInput(L.eventDate||L.date||'')); setField('location',typeof L.location==='string'?L.location:(L.property||''));
   setField('start',toTimeInput(L.startTime||'')); setField('end',toTimeInput(L.endTime||'')); setSelect('musicians',L.musicians);
@@ -146,6 +148,7 @@ async function openLead(id){
   document.querySelector('#quoteInclusions').value = (String(L.notes || '').match(/^Quote inclusions: (.+)$/im) || [,''])[1];
   const savedProposal = String(L.notes || '').match(/\bProposal #(\d+)\b/);
   if (savedProposal) setField('proposalNumber', savedProposal[1]);
+  restoreWorksheet(L.notes || ''); syncMoneyFields(); refreshChoices();
   loadedLeadId=id;
   showInvoicePanel();
 }
@@ -258,18 +261,25 @@ function buildRentalQuickAnswer(d){
 };
 function leadChanges(){
   const d=v();
-  return {...(backendSupportsArchive?{name:d.name,email:d.email,phone:d.phone,requestType:d.request}:{}),calendarStatus:normalizeAvail(availability),eventDate:d.date,startTime:d.start,endTime:d.end,location:d.location,musicians:d.musicians,style:d.style,message:d.message,budget:d.budget,guestCount:d.guestCount,eventType:d.eventType,fee:d.fee||null,deposit:d.deposit||null,notes:d.notes};
+  return {name:d.name,email:d.email,phone:d.phone,requestType:d.request,calendarStatus:normalizeAvail(availability),eventDate:d.date,startTime:d.start,endTime:d.end,location:d.location,musicians:d.musicians,style:d.style,message:d.message,budget:d.budget,guestCount:d.guestCount,eventType:d.eventType,fee:d.fee||null,deposit:d.deposit||null,notes:worksheetNotes(d.notes)};
 }
 async function saveLead(markWaiting=false){
   const button=document.querySelector(markWaiting?'#markSent':'#saveLead');
   if(!activeLeadId){button.textContent='No lead selected';return}
   if(loadedLeadId!==activeLeadId){button.textContent='Load lead before saving';return}
+  const status=document.querySelector('#saveStatus');
+  if(status)status.textContent='Saving…';
   const changes=leadChanges(); if(markWaiting)changes.status='WAITING';
   try{
     const r=await apiFetch(API+'/api/leads/'+encodeURIComponent(activeLeadId),{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(changes)});
     button.textContent=r.ok?(markWaiting?'Marked waiting':'Lead saved'):'Update failed';
-    if(r.ok)await loadLeads();
-  }catch{button.textContent='Update failed'}
+    if(status)status.textContent=r.ok?'Saved to the inbox.':'Save failed ('+r.status+'). Your edits are still here.';
+    if(r.ok){
+      const saved=(await r.json()).lead;
+      if(saved && Object.entries(changes).some(([key,value])=>String(saved[key]??'')!==String(value??''))){button.textContent='Check saved fields';if(status)status.textContent='Some fields were not accepted by the connected Worker.';}
+      await loadLeads();
+    }
+  }catch{button.textContent='Update failed';if(status)status.textContent='Connection failed. Retry Save lead.'}
 }
 document.querySelector('#copyFast').onclick=async()=>{await navigator.clipboard.writeText(out.value);document.querySelector('#copyFast').textContent='Copied'};
 document.querySelector('#markSent').onclick=()=>saveLead(true);
@@ -288,7 +298,7 @@ function addSetup(){
 document.querySelector('#addSetup').onclick=addSetup; addSetup();
 function getSetups(){return [...document.querySelectorAll('.setup-card')].map(card=>Object.fromEntries([...card.querySelectorAll('[data-setup]')].map(el=>[el.dataset.setup,el.value]))).filter(x=>Object.values(x).some(Boolean))}
 function hrs(a,b){if(!a||!b)return 0;let A=a.split(':').map(Number),B=b.split(':').map(Number),m=(B[0]*60+B[1])-(A[0]*60+A[1]);if(m<0)m+=1440;return m/60}
-function dollars(n){return '$'+Math.round(Number(n||0))}
+function dollars(n){return Number(n||0).toLocaleString('en-US',{style:'currency',currency:'USD',minimumFractionDigits:Number.isInteger(Number(n||0))?0:2})}
 function buildDocument(mode){
  const d=v(), ss=getSetups(), match=String(d.musicians||'').match(/\d+/), musicians=match?Number(match[0]):1, hours=hrs(d.start,d.end), travel=200, extras=Number(d.gas||0);
  const performance=(musicians*(hours>0?(250+Math.max(0,hours-1)*125):0)),calc=performance+travel+extras,fee=Number(d.fee||calc),dep=Number(d.deposit||0),balance=Math.max(0,fee-dep),altHours=hours?hours+1:3,altPerformance=musicians*(250+Math.max(0,altHours-1)*125),alt=altPerformance+travel+extras;
@@ -377,8 +387,8 @@ document.querySelector('#printPdf').onclick=()=>{buildDocument('both');const con
 
 function proposalNo(d){if(d.proposalNumber)return d.proposalNumber;if(!d.date)return 'TBD';const m=String(d.date).match(/(\d{4})-(\d{2})-(\d{2})/);return m?m[2]+m[3]+m[1].slice(2):'TBD'}
 function customerProposalHTML(){const d=v(),a=proposalChoice('a'),b=proposalChoice('b'),fee=Number(d.fee||a.fee||0),dep=Number(d.deposit||0),bal=d.balance!==''&&d.balance!=null?Number(d.balance):Math.max(0,fee-dep);const details=proDetails();const get=label=>{const x=details.find(z=>z.label===label);return x?(x.answer||x.status):'TBD'};return '<div class="formal-proposal"><div class="proposal-letterhead"><h2>Nicholas Laudani</h2><p>29 Beech Glen Street · Boston, MA 02119</p><p>studio@spinstream.xyz · 617-233-2008</p></div><div class="proposal-customer"><p><b>Proposal #'+esc(proposalNo(d))+'</b></p><p><b>To:</b> '+esc(d.name||'TBD')+'</p><p><b>Email:</b> '+esc(d.email||'TBD')+' &nbsp; <b>Phone:</b> '+esc(d.phone||'TBD')+'</p></div><h3>FEE &nbsp; '+dollars(fee)+'</h3><p><b>FOR PROFESSIONAL SERVICES</b> · Musicians / Live Music</p><div class="proposal-facts"><p><b>Date of Service:</b> '+esc(d.date||'TBD')+'</p><p><b>Location:</b> '+esc(d.location||'TBD')+'</p><p><b>Arrive / Load-in:</b> '+esc(d.loadIn||'TBD')+'</p><p><b>Start / Finish:</b> '+esc(d.start||'TBD')+' – '+esc(d.end||'TBD')+'</p><p><b>Musicians:</b> '+esc(d.musicians||'TBD')+'</p><p><b>Music / Style:</b> '+esc(d.style||'TBD')+'</p><p><b>Sound system:</b> '+esc(get('Sound system'))+'</p><p><b>Dress code:</b> '+esc(get('Dress code'))+'</p><p><b>Food / drinks:</b> '+esc(get('Food / drinks'))+'</p><p><b>Special songs / cues:</b> '+esc(d.specialSongs||get('Special songs'))+'</p><p><b>Special instructions:</b> '+esc(d.specialInstructions||get('Special instructions'))+'</p></div><div class="proposal-money"><p><b>Deposit:</b> '+dollars(dep)+'</p><p><b>Balance:</b> '+dollars(bal)+'</p></div><p class="proposal-signoff">Nicholas Laudani · 617-233-2008 · studio@spinstream.xyz</p></div>'}
-function syncMoneyFields(){const d=v(),fee=Number(d.fee||0),dep=Number(d.deposit||0);if(f.elements.balance&&!f.elements.balance.dataset.manual)f.elements.balance.value=fee?Math.max(0,fee-dep):'';if(f.elements.proposalNumber&&!f.elements.proposalNumber.value&&d.date)f.elements.proposalNumber.value=proposalNo(d)}
-f.elements.fee?.addEventListener('input',syncMoneyFields);f.elements.deposit?.addEventListener('input',syncMoneyFields);f.elements.date?.addEventListener('change',syncMoneyFields);f.elements.balance?.addEventListener('input',()=>f.elements.balance.dataset.manual='1');
+function syncMoneyFields(){const d=v(),fee=Number(d.fee||0),dep=Number(d.deposit||0);if(f.elements.balance)f.elements.balance.value=fee?Math.max(0,fee-dep):'';if(f.elements.proposalNumber&&!f.elements.proposalNumber.value&&d.date)f.elements.proposalNumber.value=proposalNo(d)}
+f.elements.fee?.addEventListener('input',syncMoneyFields);f.elements.deposit?.addEventListener('input',syncMoneyFields);f.elements.date?.addEventListener('change',syncMoneyFields);
 const beforeFormalBuild=buildDocument;buildDocument=function(mode){beforeFormalBuild(mode);const box=document.querySelector('#documentPreview');box.innerHTML=customerProposalHTML()+(mode==='both'?'<h3 class="choice-heading">PERFORMANCE OPTIONS</h3>'+box.innerHTML:'')};
 
 
@@ -515,3 +525,52 @@ document.querySelector('#generateDepositLink').onclick = async function(){
   }catch(error){if(id===activeLeadId)status.textContent=error.message}
   finally{this.disabled=false}
 };
+
+// Keep supplemental inputs in the saved notes envelope for compatibility with existing Workers.
+const extraContactFields = ['venueContact','guestAge','musicType','travelPreference','competition','included'];
+const confirmationFields = ['confirmDate','confirmTimes','confirmLocation'];
+const choiceFields = ['Musicians','Hours','Travel','Extras','Override'];
+const worksheetMarker = '[ReachOut worksheet v1] ';
+function worksheetNotes(notes) {
+  const fields = {};
+  for(const name of extraContactFields) fields[name] = f.elements[name].value;
+  for(const name of confirmationFields) fields[name] = f.elements[name].checked;
+  for(const prefix of ['a','b']) for(const field of choiceFields){
+    const id=prefix+field;
+    fields[id]=document.getElementById(id).value;
+  }
+  return [notes,worksheetMarker+JSON.stringify(fields)].filter(Boolean).join('\n');
+}
+function restoreWorksheet(notes) {
+  const lines=notes.split('\n');
+  const last=lines[lines.length-1];
+  if(!last.startsWith(worksheetMarker))return;
+  let fields;
+  try{fields=JSON.parse(last.slice(worksheetMarker.length))}catch{return}
+  if(!fields || typeof fields!=='object')return;
+  lines.pop();
+  setField('notes',lines.join('\n'));
+  for(const name of extraContactFields)if(typeof fields[name]==='string')setField(name,fields[name]);
+  for(const name of confirmationFields)f.elements[name].checked=fields[name]===true;
+  for(const prefix of ['a','b'])for(const field of choiceFields){
+    const id=prefix+field;if(typeof fields[id]==='string')document.getElementById(id).value=fields[id];
+  }
+}
+function refreshChoices(){
+  const deposit = Number(f.elements.deposit.value || 0);
+  for (const prefix of ['a','b']) {
+    const choice = proposalChoice(prefix);
+    document.getElementById(prefix+'Total').textContent = 'Total '+dollars(choice.fee)+' · Balance after deposit '+dollars(Math.max(0,choice.fee-deposit));
+  }
+}
+for (const prefix of ['a','b']) {
+  document.getElementById(prefix+'Hours').closest('.choice-card').addEventListener('input',refreshChoices);
+  document.getElementById(prefix+'Apply').onclick=()=>{
+    f.elements.fee.value=proposalChoice(prefix).fee;
+    f.elements.fee.dispatchEvent(new Event('input',{bubbles:true}));
+    document.getElementById(prefix+'Total').textContent+=' · Applied to booking fee';
+  };
+}
+f.elements.deposit.addEventListener('input',refreshChoices);
+f.addEventListener('reset',()=>queueMicrotask(refreshChoices));
+refreshChoices();
