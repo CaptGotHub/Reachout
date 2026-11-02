@@ -32,6 +32,7 @@ document.querySelector('#ownerAccessForm').addEventListener('submit',async event
 document.querySelector('#cancelOwnerAccess').onclick=()=>{document.querySelector('#ownerAccessForm').reset();document.querySelector('#ownerAccessDialog').close();};
 function lockInbox(){
   localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(TOKEN_EXPIRY_KEY);
+  resetInvoicePanel();
   allLeads=[]; activeLeadId=null; loadedLeadId=null; activeArchivedContact=false; f.reset();out.value='';document.querySelector('#contactHistoryPanel').hidden=true;document.querySelector('#documentPreview').classList.add('hidden');
   setAuthButtons(false);
   setSecurityStatus('LEAD API PROTECTED · Private inbox locked.');
@@ -109,6 +110,7 @@ async function loadLeads(){const list=document.querySelector('#sourceLeadList');
 }
 let loadedLeadId=null;
 async function openLead(id){
+  resetInvoicePanel();
   loadedLeadId=null;
   activeLeadId=id; renderHub();
   const r=await apiFetch(API+'/api/leads/'+encodeURIComponent(id),{cache:'no-store'}),d=await r.json(); if(!r.ok)return;
@@ -142,6 +144,7 @@ async function openLead(id){
   applyLeadContext(L);
   renderContactHistory(L);
   loadedLeadId=id;
+  showInvoicePanel();
 }
 function formatEstimate(estimate){
   if(estimate===null||estimate===undefined)return '';
@@ -328,6 +331,7 @@ function toggleLeadMode(){
   document.querySelector('#spinSheet')?.classList.toggle('hidden',!spin);
   document.querySelector('#lessonSheet')?.classList.toggle('hidden',!lesson);
   document.querySelector('#eventSheet')?.classList.toggle('hidden',!event);
+  showInvoicePanel();
   document.querySelector('.proposal-choices')?.classList.toggle('hidden',!event);
   document.querySelector('.quote-actions')?.classList.toggle('hidden',!event);
   syncContextLabels();
@@ -393,6 +397,7 @@ function renderContactHistory(L){
 }
 ['email','phone','name'].forEach(name=>f.elements[name].addEventListener('input',updateArchiveContactLinks));out.addEventListener('input',updateArchiveContactLinks);
 document.querySelectorAll('[data-queue]').forEach(button=>button.addEventListener('click',()=>{
+  resetInvoicePanel();
   activeQueue=button.dataset.queue;activeLeadId=null;loadedLeadId=null;activeArchivedContact=false;
   f.reset();out.value='';document.querySelector('#contactHistoryPanel').hidden=true;document.querySelector('#documentPreview').classList.add('hidden');
   document.querySelectorAll('[data-queue]').forEach(item=>item.classList.toggle('active',item===button));loadLeads();
@@ -407,3 +412,52 @@ document.querySelector('#exportArchiveEmails').onclick=()=>{
   link.href=url;link.download='reachout-archive-email-contacts.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   document.querySelector('#archiveExportStatus').textContent=contacts.length+' email contacts exported. No messages were sent.';
 };
+
+function resetInvoicePanel(){
+  document.querySelector('#paypalPanel').hidden=true;
+  document.querySelector('#paypalLink').value='';
+  document.querySelector('#paypalStatus').textContent='';
+}
+function invoiceBooking(){
+  const d=v();
+  const deposit=Number(d.deposit);
+  const amount=Number.isFinite(deposit)&&deposit>0 ? '$'+deposit.toFixed(2)+' ' : '';
+  return amount+'live music deposit'+(d.date?' for '+d.date:'');
+}
+function showInvoicePanel(){
+  const panel=document.querySelector('#paypalPanel');
+  panel.hidden=!activeLeadId||loadedLeadId!==activeLeadId||!adminToken()||lessonMode()||spinMode()||rentalMode();
+  if(!panel.hidden)document.querySelector('#paypalBooking').textContent=(v().name||'Selected booking')+' · '+invoiceBooking();
+}
+function customerInvoiceUrl(raw){
+  try{
+    const url=new URL(raw.trim());
+    if(url.protocol==='https:' && ['paypal.com','www.paypal.com'].includes(url.hostname) &&
+       !url.port && !url.username && !url.password &&
+       /^\/invoice\/(?:p|s|pay)\/[A-Za-z0-9_-]+\/?$/.test(url.pathname))return url.href;
+  }catch{}
+  return '';
+}
+async function shareInvoice(byEmail){
+  showInvoicePanel();
+  if(document.querySelector('#paypalPanel').hidden)return;
+  const status=document.querySelector('#paypalStatus');
+  const link=customerInvoiceUrl(document.querySelector('#paypalLink').value);
+  if(!link){status.textContent='Paste the customer invoice link from PayPal.';return}
+  const d=v();
+  const subject='Invoice for your '+invoiceBooking();
+  const body='Hi '+(d.name||'there')+',\n\nHere is the PayPal invoice for your '+invoiceBooking()+':\n'+link+'\n\nNick Laudani';
+  if(byEmail){
+    if(!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(d.email)){
+      status.textContent='Enter the customer email or copy the message to share the link.';return;
+    }
+    location.href='mailto:'+encodeURIComponent(d.email)+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);
+    status.textContent='Review and send the draft in your email app.';
+  }else{
+    try{await navigator.clipboard.writeText(body);status.textContent='Copied. Paste the message into your conversation with this customer.'}
+    catch{status.textContent='Clipboard unavailable. Copy the customer invoice link from the field above.'}
+  }
+}
+document.querySelector('#paypalCopy').onclick=()=>shareInvoice(false);
+document.querySelector('#paypalEmail').onclick=()=>shareInvoice(true);
+f.elements.deposit.addEventListener('input',showInvoicePanel);
