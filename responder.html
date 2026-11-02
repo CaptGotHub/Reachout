@@ -28,6 +28,15 @@
 <div class="choice-card"><h3>Proposal A</h3><label>Musicians<input id="aMusicians" type="number" min="1" value="1"></label><label>Performance hours<input id="aHours" type="number" min=".5" step=".5" value="2"></label><label>Travel/setup<input id="aTravel" type="number" value="0"></label><label>Other expenses<input id="aExtras" type="number" value="0"></label><label>Override final fee<input id="aOverride" type="number" placeholder="leave blank for calculated"></label></div>
 <div class="choice-card"><h3>Proposal B</h3><label>Musicians<input id="bMusicians" type="number" min="1" value="1"></label><label>Performance hours<input id="bHours" type="number" min=".5" step=".5" value="3"></label><label>Travel/setup<input id="bTravel" type="number" value="0"></label><label>Other expenses<input id="bExtras" type="number" value="0"></label><label>Override final fee<input id="bOverride" type="number" placeholder="leave blank for calculated"></label></div>
 </div></section>
+<section id="paypalPanel" class="record-section" hidden>
+<h3>PayPal deposit invoice</h3>
+<p id="paypalBooking"></p>
+<a class="btn" href="https://www.paypal.com/invoice/create" target="_blank" rel="noopener noreferrer">Create or send invoice in PayPal</a>
+<p>Review the amount and recipient in PayPal. To share an existing invoice, paste its customer link below.</p>
+<label>Customer invoice link<input id="paypalLink" type="url" autocomplete="off" placeholder="https://www.paypal.com/invoice/p/…"></label>
+<button type="button" class="btn" id="paypalCopy">Copy invoice message</button>
+<button type="button" class="btn" id="paypalEmail">Open invoice email draft</button>
+<p role="status" id="paypalStatus"></p></section>
 <div class="quote-actions"><button class="btn" id="createQuote" type="button">Create Quote</button><button class="btn" id="createProposal" type="button">Create Proposal</button><button class="btn primary" id="createBoth" type="button">Preview Both Choices</button></div>
 <div id="documentPreview" class="document-preview hidden"></div>
 <section class="send-panel"><p class="kicker">PROPOSAL</p><h3>What to send</h3>
@@ -49,4 +58,4 @@
 </section></form>
 <section class="panel answer-pane"><div class="answer-top"><div><p class="kicker">ANSWER READY</p><h2>Review before sending</h2></div><span id="availBadge" class="status unknown">UNKNOWN</span></div><div id="missing" class="missing"></div><textarea id="fastAnswer" rows="16" placeholder="Your prepared response will appear here."></textarea><div class="actions"><button id="copyFast" class="btn primary">Copy answer</button><button id="markSent" class="btn">Mark sent</button></div><p class="muted">Direct SEND becomes active per source after its outbound connection is authorized server-side.</p></section></section></div></section>
 <section class="panel calendar-model"><p class="kicker">REACHOUT CALENDAR</p><h2>One calendar, several kinds of time.</h2><div class="calendar-types"><span>🎹 GIG / EVENT</span><span>🎓 PIANO LESSON</span><span>☎ CLIENT CALL</span><span>✦ SPINSTREAM CONSULT</span><span>⌂ RENTAL / SHOWING</span><span>⛔ PERSONAL / BLOCKED</span><span>↔ TRAVEL / SETUP BUFFER</span></div></section>
-</main><script src="thumbtack-import.js?v=20261006-archive1"></script><script src="responder.js?v=20261006-archive1"></script></body></html>
+</main><script src="thumbtack-import.js?v=20261006-archive1"></script><script src="responder.js?v=paypal-invoice-1"></script></body></html>
